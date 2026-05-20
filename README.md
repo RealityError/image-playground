@@ -12,6 +12,8 @@
 - 管理控制台（仪表盘、任务管理、图库、空间主管理、运行时配置）
 - 并发控制（每用户生成上限可动态调整）
 - 遮罩编辑与参考图在详情中可回溯查看
+- 详情页解析请求参数、API 实际响应、token 用量和原始 JSON，便于排查不同上游的行为差异
+- 适配 NowCoding 的 `thinking` 质量参数，同时保留 OpenAI 兼容接口路径
 
 ## 目录结构
 
@@ -28,6 +30,8 @@ gpt-image-playground/
 │   ├── src/
 │   ├── package.json
 │   └── dist/         # 构建产物（被后端静态服务）
+├── docs/
+│   └── img/          # README 截图
 ├── .env.example
 ├── API.md
 ├── start.bat        # Windows 一键启动脚本
@@ -42,6 +46,30 @@ gpt-image-playground/
 - `POST /api/v1/edit` 图片编辑 API
 - SQLite 审计日志
 - 本地图片存储 + 缩略图
+
+## 界面预览
+
+### 多用户工作台与服务端历史
+
+首页不再只是本地前端状态，而是带空间口令、在线/队列统计、服务端历史、搜索和任务状态。卡片会展示请求参数与 API 实际返回参数的差异，例如 `quality high -> auto`、`size auto -> 1107x1421`。
+
+![多用户工作台与服务端历史](docs/img/workspace-history.png)
+
+### 任务详情与参数追踪
+
+详情页可以回看输入内容、参考图、请求参数、API 响应参数、实际输出尺寸、token 用量和原始 JSON。这里主要用于对比不同上游服务的实际执行结果，排查尺寸、质量、格式等参数是否被上游改写。
+
+![任务详情与参数追踪](docs/img/detail-modal.png)
+
+<p align="center">
+  <img src="docs/img/usage-details.png" alt="用量解析" width="420">
+</p>
+
+### 遮罩编辑与局部重绘
+
+输出图可以直接进入遮罩编辑，配合画笔、橡皮、笔刷大小、撤销/重做和保存，用于继续走局部重绘流程。
+
+![遮罩编辑与局部重绘](docs/img/mask-editor.png)
 
 ## 快速开始
 
