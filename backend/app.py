@@ -60,14 +60,18 @@ from db import (
     soft_delete_owner_jobs,
     update_image_thumbnail_path,
 )
+from storage_paths import (
+    BASE_DIR,
+    GENERATED_DIR,
+    THUMBNAIL_DIR,
+    UPLOAD_DIR,
+    resolve_storage_path,
+    storage_path_for_db,
+)
 
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = Path(os.environ.get("STATIC_DIR", str(BASE_DIR.parent / "frontend" / "dist")))
-GENERATED_DIR = BASE_DIR / "generated"
-THUMBNAIL_DIR = BASE_DIR / "thumbnails"
-UPLOAD_DIR = BASE_DIR / "uploads"
 LOGS_DIR = BASE_DIR / "logs"
 
 for path in (STATIC_DIR, GENERATED_DIR, THUMBNAIL_DIR, UPLOAD_DIR, LOGS_DIR):
@@ -167,15 +171,17 @@ def get_upstream_quality_field() -> str:
 def map_upstream_quality(value: str, field_name: str) -> str | None:
     normalized = value.strip().lower()
     if field_name == "thinking":
-        if normalized == "auto":
-            return None
         return {
-            "high": "hd",
-            "hd": "hd",
-            "medium": "medium",
-            "standard": "standard",
+            "auto": None,
+            "none": "none",
+            "minimal": "minimal",
             "low": "low",
-        }.get(normalized, value)
+            "medium": "medium",
+            "standard": "medium",
+            "high": "high",
+            "hd": "xhigh",
+            "xhigh": "xhigh",
+        }.get(normalized, normalized)
     return value
 
 
@@ -194,7 +200,11 @@ def build_upstream_image_params(request_params: dict[str, Any]) -> dict[str, Any
 
     if quality_field != "quality":
         call_params.pop("quality", None)
-        upstream_quality = explicit_thinking or (map_upstream_quality(quality_value, quality_field) if quality_value else None)
+        upstream_quality = (
+            map_upstream_quality(explicit_thinking, quality_field)
+            if explicit_thinking
+            else (map_upstream_quality(quality_value, quality_field) if quality_value else None)
+        )
         if upstream_quality:
             next_extra_body[quality_field] = upstream_quality
     elif explicit_thinking:
@@ -946,7 +956,7 @@ def create_thumbnail(source_path: Path, job_id: str, image_index: int) -> Path:
 
 def try_create_thumbnail(source_path: Path, job_id: str, image_index: int) -> str | None:
     try:
-        return str(create_thumbnail(source_path, job_id, image_index))
+        return storage_path_for_db(create_thumbnail(source_path, job_id, image_index), {"thumbnails"})
     except Exception:
         return None
 
@@ -954,9 +964,8 @@ def try_create_thumbnail(source_path: Path, job_id: str, image_index: int) -> st
 def ensure_thumbnail(record: dict[str, Any]) -> Path:
     existing = clean_text(record.get("thumbnail_path"))
     if existing:
-        existing_path = Path(existing).resolve()
-        thumbnail_root = THUMBNAIL_DIR.resolve()
-        if thumbnail_root in existing_path.parents and existing_path.exists() and existing_path.is_file():
+        existing_path = resolve_storage_path(existing, {"thumbnails"})
+        if existing_path is not None and existing_path.exists() and existing_path.is_file():
             return existing_path
 
     source_path = resolve_saved_file(record.get("saved_path"))
@@ -964,7 +973,7 @@ def ensure_thumbnail(record: dict[str, Any]) -> Path:
     update_image_thumbnail_path(
         str(record.get("job_id") or ""),
         int(record.get("image_index") or 0),
-        str(thumbnail_path),
+        storage_path_for_db(thumbnail_path, {"thumbnails"}),
     )
     return thumbnail_path
 
@@ -993,7 +1002,7 @@ def persist_input_images(job_id: str, image_paths: list[Path], mask_path: Path |
                 job_id=job_id,
                 image_index=idx,
                 image_type="input",
-                saved_path=str(dest),
+                saved_path=storage_path_for_db(dest, {"generated"}),
                 created_at=created_at,
             )
         except Exception:
@@ -1007,7 +1016,7 @@ def persist_input_images(job_id: str, image_paths: list[Path], mask_path: Path |
                 job_id=job_id,
                 image_index=0,
                 image_type="mask",
-                saved_path=str(dest),
+                saved_path=storage_path_for_db(dest, {"generated"}),
                 created_at=created_at,
             )
         except Exception:
@@ -1027,7 +1036,7 @@ def local_image_payload(
     payload = {
         "index": index,
         "url": url,
-        "saved_path": str(saved_path),
+        "saved_path": storage_path_for_db(saved_path, {"generated"}),
         "size_bytes": raw_size,
         "source": source,
         "revised_prompt": getattr(image_item, "revised_prompt", None),
@@ -1138,8 +1147,8 @@ def build_history_items(owner_type: str, owner_id: str, offset: int, limit: int)
         saved_path = row.get("saved_path")
         if not saved_path:
             continue
-        local_path = Path(saved_path)
-        if not local_path.exists():
+        local_path = resolve_storage_path(saved_path, {"generated"})
+        if local_path is None or not local_path.exists():
             continue
         item: dict[str, Any] = {
             "image_id": f"{row.get('job_id', 'job')}_{row.get('image_index', 0)}",
@@ -1520,16 +1529,17 @@ def serialize_owner_job(detail: dict[str, Any]) -> dict[str, Any]:
         if image.get("deleted_at"):
             continue
         saved_path = image.get("saved_path")
-        if not saved_path or not Path(saved_path).exists():
+        local_path = resolve_storage_path(saved_path, {"generated"})
+        if local_path is None or not local_path.exists():
             continue
         image_index = int(image.get("image_index") or 0)
-        dimensions = read_image_dimensions(Path(saved_path))
+        dimensions = read_image_dimensions(local_path)
         images.append(
             {
                 "url": build_image_url("web", job_id, image_index),
                 "thumbnail_url": build_web_thumbnail_url(job_id, image_index),
                 "image_index": image_index,
-                "filename": Path(saved_path).name,
+                "filename": local_path.name,
                 "size_bytes": image.get("size_bytes"),
                 "width": dimensions[0] if dimensions else None,
                 "height": dimensions[1] if dimensions else None,
@@ -1901,9 +1911,8 @@ def resolve_saved_file(saved_path_value: str | None) -> Path:
     saved_path = clean_text(saved_path_value)
     if not saved_path:
         raise HTTPException(status_code=404, detail="Image file not found.")
-    path = Path(saved_path).resolve()
-    generated_root = GENERATED_DIR.resolve()
-    if generated_root not in path.parents:
+    path = resolve_storage_path(saved_path, {"generated"})
+    if path is None:
         raise HTTPException(status_code=403, detail="Invalid image path.")
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Image file not found.")
@@ -1914,9 +1923,8 @@ def resolve_thumbnail_file(thumbnail_path_value: str | None) -> Path:
     thumbnail_path = clean_text(thumbnail_path_value)
     if not thumbnail_path:
         raise HTTPException(status_code=404, detail="Thumbnail file not found.")
-    path = Path(thumbnail_path).resolve()
-    thumbnail_root = THUMBNAIL_DIR.resolve()
-    if thumbnail_root not in path.parents:
+    path = resolve_storage_path(thumbnail_path, {"thumbnails"})
+    if path is None:
         raise HTTPException(status_code=403, detail="Invalid thumbnail path.")
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Thumbnail file not found.")
@@ -1937,10 +1945,8 @@ def serve_thumbnail_file(record: dict[str, Any]) -> FileResponse:
 def remove_saved_paths(saved_paths: list[str]) -> int:
     removed = 0
     for raw_path in saved_paths:
-        path = Path(raw_path).resolve()
-        generated_root = GENERATED_DIR.resolve()
-        thumbnail_root = THUMBNAIL_DIR.resolve()
-        if generated_root not in path.parents and thumbnail_root not in path.parents:
+        path = resolve_storage_path(raw_path, {"generated", "thumbnails"})
+        if path is None:
             continue
         try:
             path.unlink(missing_ok=True)
@@ -2497,8 +2503,8 @@ def web_input_image(request: Request, job_id: str, image_index: int) -> FileResp
     input_record = get_input_image(job_id, image_index, "input")
     if not input_record:
         raise HTTPException(status_code=404, detail="Input image not found.")
-    path = Path(input_record["saved_path"])
-    if not path.exists():
+    path = resolve_storage_path(input_record["saved_path"], {"generated"})
+    if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Input image file not found.")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, media_type=media_type, filename=path.name, content_disposition_type="inline")
@@ -2515,8 +2521,8 @@ def web_input_mask(request: Request, job_id: str) -> FileResponse:
     input_record = get_input_image(job_id, 0, "mask")
     if not input_record:
         raise HTTPException(status_code=404, detail="Mask not found.")
-    path = Path(input_record["saved_path"])
-    if not path.exists():
+    path = resolve_storage_path(input_record["saved_path"], {"generated"})
+    if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Mask file not found.")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, media_type=media_type, filename=path.name, content_disposition_type="inline")

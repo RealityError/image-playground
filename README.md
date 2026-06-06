@@ -130,7 +130,7 @@ ADMIN_PAGE_PATH=/admin
 - 编辑/参考图接口和 OpenAI SDK 一样走 `/images/edits`
 - 不需要为 NowCoding 单独改接口路径，只需要把 `IMAGE_API_BASE_URL` 改成 `https://nowcoding.ai/v1`
 - 默认补充 `response_format=b64_json`
-- 将前端的质量选项转换为 NowCoding 使用的 `thinking` 字段，例如 `quality=high` 会转为 `thinking=hd`
+- 将前端的质量选项转换为 NowCoding 使用的 `thinking` 字段，例如 `quality=high` 会转为 `thinking=high`，`quality=hd` 会转为 `thinking=xhigh`
 
 如需手动指定兼容字段，可通过环境变量覆盖：
 

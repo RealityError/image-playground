@@ -95,9 +95,9 @@ Default quality mapping:
 | `auto` | omitted |
 | `low` | `low` |
 | `medium` | `medium` |
-| `high` | `hd` |
-| `standard` | `standard` |
-| `hd` | `hd` |
+| `high` | `high` |
+| `standard` | `medium` |
+| `hd` | `xhigh` |
 
 ## Edit
 

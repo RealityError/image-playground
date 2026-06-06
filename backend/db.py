@@ -2,6 +2,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from storage_paths import normalize_storage_path
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "service.db"
 
@@ -21,6 +23,34 @@ def ensure_column(connection: sqlite3.Connection, table: str, column: str, defin
     }
     if column not in columns:
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def migrate_storage_paths(connection: sqlite3.Connection) -> None:
+    targets = (
+        ("generation_images", "saved_path", {"generated"}),
+        ("generation_images", "thumbnail_path", {"thumbnails"}),
+        ("input_images", "saved_path", {"generated", "uploads"}),
+    )
+    for table, column, roots in targets:
+        rows = connection.execute(
+            f"""
+            SELECT rowid AS row_id, {column} AS path_value
+            FROM {table}
+            WHERE {column} IS NOT NULL
+              AND {column} <> ''
+            """
+        ).fetchall()
+        updates: list[tuple[str, int]] = []
+        for row in rows:
+            path_value = row["path_value"]
+            normalized = normalize_storage_path(path_value, roots)
+            if normalized and normalized != path_value:
+                updates.append((normalized, int(row["row_id"])))
+        if updates:
+            connection.executemany(
+                f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
+                updates,
+            )
 
 
 def _count_query(connection: sqlite3.Connection, query: str, params: tuple[Any, ...]) -> int:
@@ -199,6 +229,7 @@ def init_db() -> None:
         ensure_column(connection, "generation_images", "deleted_by", "TEXT")
         ensure_column(connection, "generation_images", "deleted_reason", "TEXT")
         ensure_column(connection, "generation_images", "files_removed_at", "TEXT")
+        migrate_storage_paths(connection)
 
 
 def log_generation_started(
