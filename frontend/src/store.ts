@@ -71,6 +71,15 @@ function isQuotaExceededError(err: unknown) {
   )
 }
 
+function areStringArraysEqual(a: string[], b: string[]) {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 // ===== Image cache (LRU) =====
 
 const imageCache = new Map<string, string>()
@@ -407,18 +416,22 @@ export const useStore = create<AppState>()(
       setFilterFavorite: (f) => set({ filterFavorite: f }),
 
       selectedTaskIds: [],
-      setSelectedTaskIds: (ids) => set((state) => ({
-        selectedTaskIds: typeof ids === 'function' ? ids(state.selectedTaskIds) : ids,
-      })),
+      setSelectedTaskIds: (ids) => set((state) => {
+        const selectedTaskIds = typeof ids === 'function' ? ids(state.selectedTaskIds) : ids
+        return areStringArraysEqual(state.selectedTaskIds, selectedTaskIds) ? state : { selectedTaskIds }
+      }),
       toggleTaskSelection: (id, force) => set((state) => {
         const selected = force ?? !state.selectedTaskIds.includes(id)
+        if (selected === state.selectedTaskIds.includes(id)) return state
         return {
           selectedTaskIds: selected
             ? [...state.selectedTaskIds, id]
             : state.selectedTaskIds.filter((x) => x !== id),
         }
       }),
-      clearSelection: () => set({ selectedTaskIds: [] }),
+      clearSelection: () => set((state) => (
+        state.selectedTaskIds.length ? { selectedTaskIds: [] } : state
+      )),
 
       detailTaskId: null,
       setDetailTaskId: (id) => set({ detailTaskId: id }),
@@ -441,7 +454,17 @@ export const useStore = create<AppState>()(
       setConfirmDialog: (d) => set({ confirmDialog: d }),
 
       serverStats: { activeSpaces: 0, activeGenerations: 0, ownerActiveGenerations: 0, userConcurrencyLimit: 3 },
-      setServerStats: (s) => set((state) => ({ serverStats: { ...state.serverStats, ...s } })),
+      setServerStats: (s) => set((state) => {
+        const serverStats = { ...state.serverStats, ...s }
+        return (
+          serverStats.activeSpaces === state.serverStats.activeSpaces &&
+          serverStats.activeGenerations === state.serverStats.activeGenerations &&
+          serverStats.ownerActiveGenerations === state.serverStats.ownerActiveGenerations &&
+          serverStats.userConcurrencyLimit === state.serverStats.userConcurrencyLimit
+        )
+          ? state
+          : { serverStats }
+      }),
     }),
     {
       name: PERSIST_STORAGE_KEY,

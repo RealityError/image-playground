@@ -1,6 +1,61 @@
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from 'react'
 import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
+import type { TaskRecord } from '../types'
 import TaskCard from './TaskCard'
+
+type SelectionBox = { startPageX: number; startPageY: number; currentPageX: number; currentPageY: number }
+type DragCardRect = { taskId: string; left: number; right: number; top: number; bottom: number }
+type TaskClickEvent = ReactMouseEvent | ReactTouchEvent
+type TaskAction = (task: TaskRecord) => void
+type TaskClickAction = (task: TaskRecord, event: TaskClickEvent) => void
+
+const makeSelectionKey = (ids: string[]) => ids.join('\0')
+
+const TaskGridItem = memo(function TaskGridItem({
+  task,
+  onTaskClick,
+  onReuseTask,
+  onEditOutputsTask,
+  onDeleteTask,
+}: {
+  task: TaskRecord
+  onTaskClick: TaskClickAction
+  onReuseTask: TaskAction
+  onEditOutputsTask: TaskAction
+  onDeleteTask: TaskAction
+}) {
+  const isSelected = useStore((s) => s.selectedTaskIds.includes(task.id))
+
+  const handleClick = useCallback((event: TaskClickEvent) => {
+    onTaskClick(task, event)
+  }, [onTaskClick, task])
+
+  const handleReuse = useCallback(() => {
+    onReuseTask(task)
+  }, [onReuseTask, task])
+
+  const handleEditOutputs = useCallback(() => {
+    onEditOutputsTask(task)
+  }, [onEditOutputsTask, task])
+
+  const handleDelete = useCallback(() => {
+    onDeleteTask(task)
+  }, [onDeleteTask, task])
+
+  return (
+    <div className="task-card-wrapper" data-task-id={task.id}>
+      <TaskCard
+        task={task}
+        onClick={handleClick}
+        onReuse={handleReuse}
+        onEditOutputs={handleEditOutputs}
+        onDelete={handleDelete}
+        isSelected={isSelected}
+      />
+    </div>
+  )
+})
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
@@ -8,16 +63,20 @@ export default function TaskGrid() {
   const filterStatus = useStore((s) => s.filterStatus)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
-  const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const clearSelection = useStore((s) => s.clearSelection)
   const rootRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
-  const [selectionBox, setSelectionBox] = useState<{ startPageX: number; startPageY: number; currentPageX: number; currentPageY: number } | null>(null)
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null)
   const isDragging = useRef(false)
   const dragStart = useRef<{ pageX: number; pageY: number } | null>(null)
   const lastClientPoint = useRef<{ x: number; y: number } | null>(null)
   const hasDragged = useRef(false)
+  const dragCardRects = useRef<DragCardRect[]>([])
+  const initialSelectionSet = useRef<Set<string>>(new Set())
+  const lastAppliedSelectionKey = useRef('')
+  const pendingSelectionPoint = useRef<{ pageX: number; pageY: number } | null>(null)
+  const selectionFrameRef = useRef<number | null>(null)
   const dragScrollIntervalRef = useRef<number | null>(null)
   const dragScrollDirectionRef = useRef<-1 | 1 | null>(null)
   const lastToastTimeRef = useRef(0)
@@ -42,18 +101,65 @@ export default function TaskGrid() {
     })
   }, [tasks, searchQuery, filterStatus])
 
-  const handleDelete = (task: typeof tasks[0]) => {
+  const handleDelete = useCallback((task: TaskRecord) => {
     setConfirmDialog({
       title: '删除记录',
       message: '确定要删除这条记录吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
       action: () => removeTask(task),
     })
-  }
+  }, [setConfirmDialog])
+
+  const handleTaskClick = useCallback((task: TaskRecord, event: TaskClickEvent) => {
+    if (Date.now() < suppressClickUntil.current) {
+      event.preventDefault()
+      return
+    }
+    suppressClickUntil.current = 0
+    const isCtrl = isMac ? event.metaKey : event.ctrlKey
+    const selectedCount = useStore.getState().selectedTaskIds.length
+    if (isCtrl) {
+      useStore.getState().toggleTaskSelection(task.id)
+    } else if (selectedCount > 0) {
+      clearSelection()
+      setDetailTaskId(task.id)
+    } else {
+      setDetailTaskId(task.id)
+    }
+  }, [clearSelection, isMac, setDetailTaskId])
+
+  const handleReuseTask = useCallback((task: TaskRecord) => {
+    reuseConfig(task)
+  }, [])
+
+  const handleEditOutputsTask = useCallback((task: TaskRecord) => {
+    editOutputs(task)
+  }, [])
 
   const getPagePoint = (clientX: number, clientY: number) => ({
     pageX: clientX + window.scrollX,
     pageY: clientY + window.scrollY,
   })
+
+  const cacheDragCardRects = () => {
+    if (!gridRef.current) {
+      dragCardRects.current = []
+      return
+    }
+    dragCardRects.current = Array.from(gridRef.current.querySelectorAll<HTMLElement>('.task-card-wrapper'))
+      .map((card) => {
+        const taskId = card.dataset.taskId
+        if (!taskId) return null
+        const rect = card.getBoundingClientRect()
+        return {
+          taskId,
+          left: rect.left + window.scrollX,
+          right: rect.right + window.scrollX,
+          top: rect.top + window.scrollY,
+          bottom: rect.bottom + window.scrollY,
+        }
+      })
+      .filter((rect): rect is DragCardRect => Boolean(rect))
+  }
 
   const beginSelection = (target: HTMLElement, clientX: number, clientY: number, isCtrl: boolean) => {
     const point = getPagePoint(clientX, clientY)
@@ -61,11 +167,14 @@ export default function TaskGrid() {
     startedOnCard.current = Boolean(target.closest('.task-card-wrapper'))
     startedWithCtrl.current = isCtrl
     initialSelection.current = [...useStore.getState().selectedTaskIds]
+    initialSelectionSet.current = new Set(initialSelection.current)
+    lastAppliedSelectionKey.current = makeSelectionKey(initialSelection.current)
 
     isDragging.current = true
     hasDragged.current = false
     dragStart.current = point
     lastClientPoint.current = { x: clientX, y: clientY }
+    cacheDragCardRects()
     document.body.classList.add('select-none')
     document.body.classList.add('drag-selecting')
     setSelectionBox({
@@ -78,42 +187,63 @@ export default function TaskGrid() {
 
   const updateSelectionFromPoint = (pageX: number, pageY: number) => {
     const start = dragStart.current
-    if (!start || !gridRef.current) return
+    if (!start) return
 
     const minX = Math.min(start.pageX, pageX)
     const maxX = Math.max(start.pageX, pageX)
     const minY = Math.min(start.pageY, pageY)
     const maxY = Math.max(start.pageY, pageY)
 
-    const cards = gridRef.current.querySelectorAll('.task-card-wrapper')
     const newSelected = new Set(initialSelection.current)
-    const initialSelected = new Set(initialSelection.current)
+    const initialSelected = initialSelectionSet.current
 
-    cards.forEach((card) => {
-      const rect = card.getBoundingClientRect()
-      const taskId = card.getAttribute('data-task-id')
-      if (!taskId) return
-
-      const cardLeft = rect.left + window.scrollX
-      const cardRight = rect.right + window.scrollX
-      const cardTop = rect.top + window.scrollY
-      const cardBottom = rect.bottom + window.scrollY
-
+    dragCardRects.current.forEach((card) => {
       const isIntersecting =
-        minX < cardRight && maxX > cardLeft && minY < cardBottom && maxY > cardTop
+        minX < card.right && maxX > card.left && minY < card.bottom && maxY > card.top
 
       if (isIntersecting) {
-        if (initialSelected.has(taskId)) {
-          newSelected.delete(taskId)
+        if (initialSelected.has(card.taskId)) {
+          newSelected.delete(card.taskId)
         } else {
-          newSelected.add(taskId)
+          newSelected.add(card.taskId)
         }
-      } else if (!initialSelected.has(taskId)) {
-        newSelected.delete(taskId)
+      } else if (!initialSelected.has(card.taskId)) {
+        newSelected.delete(card.taskId)
       }
     })
 
-    setSelectedTaskIds(Array.from(newSelected))
+    const nextSelected = Array.from(newSelected)
+    const nextSelectionKey = makeSelectionKey(nextSelected)
+    if (nextSelectionKey === lastAppliedSelectionKey.current) return
+    lastAppliedSelectionKey.current = nextSelectionKey
+    setSelectedTaskIds(nextSelected)
+  }
+
+  const cancelSelectionFrame = () => {
+    if (selectionFrameRef.current != null) {
+      window.cancelAnimationFrame(selectionFrameRef.current)
+      selectionFrameRef.current = null
+    }
+    pendingSelectionPoint.current = null
+  }
+
+  const scheduleSelectionUpdate = (pageX: number, pageY: number) => {
+    pendingSelectionPoint.current = { pageX, pageY }
+    if (selectionFrameRef.current != null) return
+    selectionFrameRef.current = window.requestAnimationFrame(() => {
+      selectionFrameRef.current = null
+      const point = pendingSelectionPoint.current
+      pendingSelectionPoint.current = null
+      const start = dragStart.current
+      if (!point || !start || !isDragging.current || !hasDragged.current) return
+      setSelectionBox({
+        startPageX: start.pageX,
+        startPageY: start.pageY,
+        currentPageX: point.pageX,
+        currentPageY: point.pageY,
+      })
+      updateSelectionFromPoint(point.pageX, point.pageY)
+    })
   }
 
   useEffect(() => {
@@ -146,9 +276,13 @@ export default function TaskGrid() {
         suppressClickUntil.current = Date.now() + 250
       }
       stopDragScroll()
+      cancelSelectionFrame()
       isDragging.current = false
       dragStart.current = null
       lastClientPoint.current = null
+      dragCardRects.current = []
+      initialSelectionSet.current = new Set()
+      lastAppliedSelectionKey.current = ''
       setSelectionBox(null)
     }
 
@@ -181,13 +315,7 @@ export default function TaskGrid() {
       if (distance < 6 && !hasDragged.current) return
 
       hasDragged.current = true
-      setSelectionBox({
-        startPageX: start.pageX,
-        startPageY: start.pageY,
-        currentPageX: point.pageX,
-        currentPageY: point.pageY,
-      })
-      updateSelectionFromPoint(point.pageX, point.pageY)
+      scheduleSelectionUpdate(point.pageX, point.pageY)
       e.preventDefault()
 
       const scrollThreshold = 40
@@ -204,14 +332,7 @@ export default function TaskGrid() {
       if (!isDragging.current || !dragStart.current || !lastClientPoint.current || !hasDragged.current) return
 
       const point = getPagePoint(lastClientPoint.current.x, lastClientPoint.current.y)
-      const start = dragStart.current
-      setSelectionBox({
-        startPageX: start.pageX,
-        startPageY: start.pageY,
-        currentPageX: point.pageX,
-        currentPageY: point.pageY,
-      })
-      updateSelectionFromPoint(point.pageX, point.pageY)
+      scheduleSelectionUpdate(point.pageX, point.pageY)
     }
 
     const handleDocumentWheel = (e: WheelEvent) => {
@@ -243,6 +364,7 @@ export default function TaskGrid() {
     window.addEventListener('scroll', handleDocumentScroll, true)
     return () => {
       stopDragScroll()
+      cancelSelectionFrame()
       document.removeEventListener('mousedown', handleDocumentMouseDown, true)
       document.removeEventListener('mousemove', handleDocumentMouseMove, true)
       document.removeEventListener('mouseup', handleDocumentMouseUp, true)
@@ -286,31 +408,14 @@ export default function TaskGrid() {
     >
       <div ref={gridRef} className="grid grid-cols-1 gap-4 pb-10 sm:grid-cols-2 xl:grid-cols-3">
         {filteredTasks.map((task) => (
-          <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
-            <TaskCard
-              task={task}
-              onClick={(e) => {
-                if (Date.now() < suppressClickUntil.current) {
-                  e.preventDefault()
-                  return
-                }
-                suppressClickUntil.current = 0
-                const isCtrl = isMac ? e.metaKey : e.ctrlKey
-                if (isCtrl) {
-                  useStore.getState().toggleTaskSelection(task.id)
-                } else if (selectedTaskIds.length > 0) {
-                  clearSelection()
-                  setDetailTaskId(task.id)
-                } else {
-                  setDetailTaskId(task.id)
-                }
-              }}
-              onReuse={() => reuseConfig(task)}
-              onEditOutputs={() => editOutputs(task)}
-              onDelete={() => handleDelete(task)}
-              isSelected={selectedTaskIds.includes(task.id)}
-            />
-          </div>
+          <TaskGridItem
+            key={task.id}
+            task={task}
+            onTaskClick={handleTaskClick}
+            onReuseTask={handleReuseTask}
+            onEditOutputsTask={handleEditOutputsTask}
+            onDeleteTask={handleDelete}
+          />
         ))}
       </div>
       {selectionBox && (

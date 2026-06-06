@@ -458,9 +458,9 @@ export default function InputBar() {
   // ==========================================================================
   // 派生值
   // ==========================================================================
-  const serverStats = useStore((s) => s.serverStats)
+  const userConcurrencyLimit = useStore((s) => s.serverStats.userConcurrencyLimit)
   const canSubmit = Boolean(prompt.trim())
-  const outputImageLimit = getOutputImageLimitForSettings(settings, serverStats.userConcurrencyLimit)
+  const outputImageLimit = getOutputImageLimitForSettings(settings, userConcurrencyLimit)
   const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const maskTargetImage = maskDraft
@@ -568,12 +568,12 @@ export default function InputBar() {
   }, [params.n])
 
   useEffect(() => {
-    const normalizedParams = normalizeParamsForSettings(params, settings, { hasInputImages: inputImages.length > 0, concurrencyLimit: serverStats.userConcurrencyLimit })
+    const normalizedParams = normalizeParamsForSettings(params, settings, { hasInputImages: inputImages.length > 0, concurrencyLimit: userConcurrencyLimit })
     const patch = getChangedParams(params, normalizedParams)
     if (Object.keys(patch).length) {
       setParams(patch)
     }
-  }, [inputImages.length, params, settings, setParams, serverStats.userConcurrencyLimit])
+  }, [inputImages.length, params, settings, setParams, userConcurrencyLimit])
 
   useEffect(() => () => {
     if (imageHintTimerRef.current != null) {

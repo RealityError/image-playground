@@ -30,7 +30,7 @@ export default function TaskCard({
   const [swipeStartedSelected, setSwipeStartedSelected] = useState(false)
   const [swipeActionActive, setSwipeActionActive] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
-  const settings = useStore((s) => s.settings)
+  const alwaysShowRetryButton = useStore((s) => s.settings.alwaysShowRetryButton)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
   const suppressClickUntilRef = useRef(0)
@@ -494,7 +494,7 @@ export default function TaskCard({
               className="flex w-full items-center justify-between flex-shrink-0 mt-0.5 sm:w-auto sm:justify-end sm:gap-1"
               onClick={(e) => e.stopPropagation()}
             >
-              {((task.status === 'error' && !isReconnecting) || settings.alwaysShowRetryButton) && (
+              {((task.status === 'error' && !isReconnecting) || alwaysShowRetryButton) && (
                 <button
                   onClick={() => retryTask(task)}
                   className="p-1.5 rounded-md text-gray-400 opacity-70 transition hover:bg-blue-50 hover:text-blue-500 hover:opacity-100 dark:hover:bg-blue-950/30"
