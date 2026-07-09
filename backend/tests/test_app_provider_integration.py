@@ -24,7 +24,7 @@ def test_build_generate_params_uses_selected_provider_model(app_module) -> None:
     db.upsert_provider_profile(
         {
             "id": "strict",
-            "name": "严格线路",
+            "name": "严格上游",
             "provider_type": "openai-compatible",
             "base_url": "",
             "api_key": "sk-strict",
@@ -50,14 +50,14 @@ def test_build_generate_params_uses_selected_provider_model(app_module) -> None:
     public_params = app_module.public_request_params(request_params)
     assert public_params["model"] == "custom-image"
     assert public_params["provider_id"] == "strict"
-    assert public_params["provider_name"] == "严格线路"
+    assert public_params["provider_name"] == "严格上游"
 
 
 def test_build_generate_params_rejects_unsupported_provider_parameter(app_module) -> None:
     db.upsert_provider_profile(
         {
             "id": "strict",
-            "name": "严格线路",
+            "name": "严格上游",
             "provider_type": "openai-compatible",
             "base_url": "",
             "api_key": "sk-strict",
@@ -87,7 +87,7 @@ def test_default_provider_falls_back_to_env_when_saved_provider_has_no_key(app_m
     db.upsert_provider_profile(
         {
             "id": "empty",
-            "name": "未配置线路",
+            "name": "未配置上游",
             "provider_type": "openai-compatible",
             "base_url": "",
             "enabled": True,

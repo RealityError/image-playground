@@ -170,7 +170,7 @@ def build_env_provider_profile() -> ProviderProfile:
     model = get_model_name()
     return ProviderProfile(
         id="default",
-        name="默认线路",
+        name="默认上游",
         provider_type="openai-compatible",
         base_url=base_url,
         api_key=api_key,

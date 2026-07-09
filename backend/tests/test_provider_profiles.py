@@ -19,7 +19,7 @@ def test_provider_profile_masks_api_key(temp_db) -> None:
     profile = temp_db.upsert_provider_profile(
         {
             "id": "openai-main",
-            "name": "OpenAI 主线路",
+            "name": "OpenAI 主上游",
             "provider_type": "openai-compatible",
             "base_url": "https://api.openai.com/v1",
             "api_key": "sk-test-secret-1234",
@@ -41,7 +41,7 @@ def test_provider_profile_keeps_existing_api_key_when_omitted(temp_db) -> None:
     temp_db.upsert_provider_profile(
         {
             "id": "openai-main",
-            "name": "OpenAI 主线路",
+            "name": "OpenAI 主上游",
             "provider_type": "openai-compatible",
             "base_url": "",
             "api_key": "sk-first-0001",
@@ -91,7 +91,7 @@ def test_log_generation_started_records_provider_snapshot(temp_db) -> None:
         input_image_count=0,
         mask_used=False,
         provider_id="openai-main",
-        provider_name_snapshot="OpenAI 主线路",
+        provider_name_snapshot="OpenAI 主上游",
         provider_type="openai-compatible",
     )
 
@@ -103,7 +103,7 @@ def test_log_generation_started_records_provider_snapshot(temp_db) -> None:
         ).fetchone()
 
     assert row["provider_id"] == "openai-main"
-    assert row["provider_name_snapshot"] == "OpenAI 主线路"
+    assert row["provider_name_snapshot"] == "OpenAI 主上游"
     assert row["provider_type"] == "openai-compatible"
     assert row["model"] == "gpt-image-2"
 
@@ -113,7 +113,7 @@ def test_provider_parameter_validation_rejects_unsupported_values() -> None:
 
     profile = ProviderProfile(
         id="strict",
-        name="严格线路",
+        name="严格上游",
         provider_type="openai-compatible",
         base_url="",
         api_key="sk-test",

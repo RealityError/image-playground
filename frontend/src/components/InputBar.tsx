@@ -1444,7 +1444,7 @@ export default function InputBar() {
       disabled={providers.length <= 1}
       className={`${baseControlClass} w-full truncate`}
     >
-      {providers.length === 0 && <option value="">默认线路</option>}
+      {providers.length === 0 && <option value="">默认上游</option>}
       {providers.map((provider) => (
         <option key={provider.id} value={provider.id}>{provider.name}</option>
       ))}
@@ -1498,7 +1498,7 @@ export default function InputBar() {
   const renderParams = (cols: string) => (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
       <label className="relative flex flex-col gap-0.5">
-        <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">线路</span>
+        <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">上游</span>
         {renderProviderDropdown()}
       </label>
       <label className="relative flex flex-col gap-0.5">

@@ -140,7 +140,7 @@ function joinCsv(value?: string[]) {
 function defaultProviderDraft(): AdminProviderProfile & { api_key?: string; clear_api_key?: boolean } {
   return {
     id: 'openai-main',
-    name: 'OpenAI 主线路',
+    name: 'OpenAI 主上游',
     provider_type: 'openai-compatible',
     base_url: '',
     enabled: true,
@@ -219,7 +219,7 @@ function ProviderConfigCard() {
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-950 shadow-sm p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Provider 配置</h3>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">上游配置</h3>
         <button
           type="button"
           onClick={() => setDraft(defaultProviderDraft())}

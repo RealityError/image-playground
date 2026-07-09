@@ -62,7 +62,7 @@ class ProviderProfile:
                 normalized_parameters[str(key)] = []
         return cls(
             id=str(data.get("id") or "default"),
-            name=str(data.get("name") or "默认线路"),
+            name=str(data.get("name") or "默认上游"),
             provider_type=str(data.get("provider_type") or "openai-compatible"),
             base_url=str(data.get("base_url") or ""),
             api_key=str(data.get("api_key") or ""),
