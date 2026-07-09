@@ -1,10 +1,31 @@
-import { useStore } from '../store'
+import { useMemo } from 'react'
+import { removeMultipleTasks, useStore } from '../store'
+import { getFailedTaskIds } from '../lib/taskFilters'
 
 export default function SearchBar() {
   const searchQuery = useStore((s) => s.searchQuery)
   const setSearchQuery = useStore((s) => s.setSearchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
   const setFilterStatus = useStore((s) => s.setFilterStatus)
+  const tasks = useStore((s) => s.tasks)
+  const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const clearSelection = useStore((s) => s.clearSelection)
+  const failedTaskIds = useMemo(() => getFailedTaskIds(tasks), [tasks])
+
+  const handleClearFailedTasks = () => {
+    if (!failedTaskIds.length) return
+
+    setConfirmDialog({
+      title: '清理失败记录',
+      message: `确定要删除 ${failedTaskIds.length} 条失败记录吗？已完成和生成中的记录不会受影响。`,
+      confirmText: '清理',
+      tone: 'warning',
+      action: () => {
+        void removeMultipleTasks(failedTaskIds)
+        clearSelection()
+      },
+    })
+  }
 
   return (
     <div data-no-drag-select className="mt-5 mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -19,6 +40,16 @@ export default function SearchBar() {
           <option value="running">生成中</option>
           <option value="error">失败</option>
         </select>
+        {failedTaskIds.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearFailedTasks}
+            className="h-10 rounded-xl border border-yellow-200/80 bg-yellow-50/80 px-3 text-sm font-medium text-yellow-700 transition hover:bg-yellow-100 dark:border-yellow-500/20 dark:bg-yellow-500/10 dark:text-yellow-300 dark:hover:bg-yellow-500/20"
+            title={`清理 ${failedTaskIds.length} 条失败记录`}
+          >
+            清理失败
+          </button>
+        )}
       </div>
       <div className="relative flex-1 z-10 sm:max-w-3xl">
         <svg
