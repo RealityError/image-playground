@@ -83,7 +83,7 @@ start.bat
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填入启动密钥；上游 API Key 建议进管理后台配置
+# 编辑 .env 填入服务器启动配置；上游 API Key 进管理后台配置
 
 cd backend
 python3 -m venv .venv
@@ -108,7 +108,7 @@ npm run build
 
 ## 环境变量
 
-`.env` 现在只负责服务启动和默认兜底上游。正式的多上游配置请登录管理后台，在「系统 / 上游配置」里维护；API Key 只允许管理员写入，接口不会明文回显。
+`.env` 只负责服务器配置，例如启动密钥、端口、Cookie 安全开关、请求超时和口令长度。上游 provider 单独保存在后端数据库里，请登录管理后台，在「系统 / 上游配置」里维护；API Key 只允许管理员写入，接口不会明文回显。
 
 ```env
 OWNER_SECRET=replace-with-a-long-secret
@@ -116,13 +116,9 @@ COOKIE_SIGNING_SECRET=replace-with-another-long-secret
 ADMIN_PASSWORD=replace-with-admin-password
 ADMIN_PAGE_PATH=/admin
 PORT=30116
-
-# 可选：未在管理后台配置上游时使用的默认兜底
-IMAGE_API_KEY=
-IMAGE_API_BASE_URL=https://api.openai.com/v1
-IMAGE_MODEL=gpt-image-2
 IMAGE_API_TIMEOUT=360
-IMAGE_RESPONSE_FORMAT=
+MIN_WEB_PASSPHRASE_LENGTH=6
+COOKIE_SECURE=0
 ```
 
 管理后台上游配置支持 `id`、名称、OpenAI-compatible `base_url`、API Key、默认模型、模型列表和参数白名单。参数不在白名单内会直接报错，不会自动降级。

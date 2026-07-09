@@ -70,7 +70,7 @@ Request:
 Supported fields:
 
 - `prompt`: required.
-- `provider_id`: optional. Uses the admin-configured default upstream when omitted.
+- `provider_id`: optional. Uses the first enabled admin-configured upstream with an API Key when omitted.
 - `model`: optional. Must be available on the selected upstream.
 - `n`: optional, `1` to `8`.
 - `size`: optional. Use `auto` or `WIDTHxHEIGHT`. Width and height must be multiples of 16, the longest edge can be up to `3840`, aspect ratio must not exceed `3:1`, and total pixels are capped at 4K level. Common values: `1024x1024`, `1536x1024`, `1024x1536`, `2048x2048`, `2048x1152`, `1152x2048`, `3840x2160`, `2160x3840`.

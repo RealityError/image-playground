@@ -151,34 +151,15 @@ def get_image_api_timeout() -> float:
 
 
 def get_model_name() -> str:
-    val = get_runtime_config("image_model", "")
-    if val:
-        return val
-    return get_env("IMAGE_MODEL", "gpt-image-2") or "gpt-image-2"
+    rows = list_provider_profiles(include_disabled=False, include_secret=False)
+    configured_row = next((row for row in rows if row.get("api_key_configured")), None)
+    if configured_row:
+        return str(configured_row.get("default_model") or "未配置")
+    return "未配置"
 
 
 def get_default_response_format() -> str | None:
-    configured = clean_text(get_env("IMAGE_RESPONSE_FORMAT"))
-    if configured:
-        return configured
     return None
-
-
-def build_env_provider_profile() -> ProviderProfile:
-    api_key = get_env("IMAGE_API_KEY") or get_env("OPENAI_API_KEY") or ""
-    base_url = get_env("IMAGE_API_BASE_URL") or ""
-    model = get_model_name()
-    return ProviderProfile(
-        id="default",
-        name="默认上游",
-        provider_type="openai-compatible",
-        base_url=base_url,
-        api_key=api_key,
-        enabled=True,
-        default_model=model,
-        models=[model],
-        parameters=dict(DEFAULT_PROVIDER_PARAMETERS),
-    )
 
 
 def resolve_provider_profile(provider_id: str | None = None) -> ProviderProfile:
@@ -191,7 +172,9 @@ def resolve_provider_profile(provider_id: str | None = None) -> ProviderProfile:
     else:
         rows = list_provider_profiles(include_disabled=False, include_secret=True)
         configured_row = next((row for row in rows if row.get("api_key")), None)
-        profile = ProviderProfile.from_mapping(configured_row) if configured_row else build_env_provider_profile()
+        if configured_row is None:
+            raise HTTPException(status_code=500, detail="No enabled provider with API key is configured.")
+        profile = ProviderProfile.from_mapping(configured_row)
 
     if not profile.enabled:
         raise HTTPException(status_code=400, detail=f"Provider is disabled: {profile.id}.")
@@ -202,16 +185,11 @@ def resolve_provider_profile(provider_id: str | None = None) -> ProviderProfile:
 
 def public_provider_profiles() -> list[dict[str, Any]]:
     rows = list_provider_profiles(include_disabled=False, include_secret=False)
-    if rows:
-        return [
-            ProviderProfile.from_mapping(row).public_snapshot()
-            for row in rows
-            if row.get("api_key_configured")
-        ]
-    env_profile = build_env_provider_profile()
-    if not env_profile.api_key:
-        return []
-    return [env_profile.public_snapshot()]
+    return [
+        ProviderProfile.from_mapping(row).public_snapshot()
+        for row in rows
+        if row.get("api_key_configured")
+    ]
 
 
 def get_min_passphrase_length() -> int:
@@ -509,7 +487,7 @@ def get_admin_page_path() -> str:
 
 def get_client(provider: ProviderProfile | None = None) -> OpenAI:
     active_provider = provider or resolve_provider_profile()
-    api_key = active_provider.api_key or get_env("IMAGE_API_KEY") or get_env("OPENAI_API_KEY")
+    api_key = active_provider.api_key
     if not api_key:
         raise HTTPException(status_code=500, detail=f"Provider API key is not configured: {active_provider.id}.")
 
@@ -526,12 +504,12 @@ def get_client(provider: ProviderProfile | None = None) -> OpenAI:
 
 
 def describe_image_upstream_error(exc: Exception, provider: ProviderProfile | None = None) -> str:
-    base_url = provider.base_url if provider and provider.base_url else get_env("IMAGE_API_BASE_URL") or "https://api.openai.com/v1"
+    base_url = provider.base_url if provider and provider.base_url else "https://api.openai.com/v1"
     timeout = get_image_api_timeout()
     if isinstance(exc, APITimeoutError):
         return f"upstream request timed out after {timeout:g}s while connecting to {base_url}"
     if isinstance(exc, APIConnectionError):
-        return f"upstream connection failed for {base_url}: {exc}. Check network/proxy/DNS and IMAGE_API_BASE_URL."
+        return f"upstream connection failed for {base_url}: {exc}. Check network/proxy/DNS and provider base_url."
     if isinstance(exc, APIError):
         status_code = getattr(exc, "status_code", None)
         response = getattr(exc, "response", None)
@@ -3085,7 +3063,6 @@ def admin_system(request: Request) -> dict[str, Any]:
 CONFIGURABLE_KEYS = {
     "user_concurrency_limit": {"type": "int", "min": 1, "max": 20, "label": "用户并发上限"},
     "image_api_timeout": {"type": "float", "min": 10, "max": 3600, "label": "API超时(秒)"},
-    "image_model": {"type": "str", "label": "模型名称"},
     "min_web_passphrase_length": {"type": "int", "min": 4, "max": 64, "label": "口令最短长度"},
 }
 
@@ -3102,8 +3079,6 @@ def admin_get_config(request: Request) -> dict[str, Any]:
             result[key] = str(DEFAULT_USER_CONCURRENCY_LIMIT)
         elif key == "image_api_timeout":
             result[key] = get_env("IMAGE_API_TIMEOUT", "360") or "360"
-        elif key == "image_model":
-            result[key] = get_env("IMAGE_MODEL", "gpt-image-2") or "gpt-image-2"
         elif key == "min_web_passphrase_length":
             result[key] = get_env("MIN_WEB_PASSPHRASE_LENGTH", "6") or "6"
         else:

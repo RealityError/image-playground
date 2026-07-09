@@ -23,8 +23,8 @@ set "GIT_HTTPS_PROXY="
 
 if not exist "%ROOT%.env" (
   echo [ERROR] .env not found in project root.
-  echo Please copy .env.example to .env and fill in startup secrets first.
-  echo Upstream API keys can be configured later in the admin console.
+  echo Please copy .env.example to .env and fill in server settings first.
+  echo Upstream providers and API keys are configured in the admin console.
   pause
   exit /b 1
 )

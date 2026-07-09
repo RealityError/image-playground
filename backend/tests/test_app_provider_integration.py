@@ -13,7 +13,6 @@ def app_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OWNER_SECRET", "owner-secret-for-tests")
     monkeypatch.setenv("COOKIE_SIGNING_SECRET", "cookie-secret-for-tests")
     monkeypatch.setenv("ADMIN_PASSWORD", "admin-password-for-tests")
-    monkeypatch.setenv("IMAGE_API_KEY", "sk-env-test")
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "service.db")
     sys.modules.pop("app", None)
     module = importlib.import_module("app")
@@ -83,7 +82,7 @@ def test_build_generate_params_rejects_unsupported_provider_parameter(app_module
     assert "quality" in str(exc.value.detail)
 
 
-def test_default_provider_falls_back_to_env_when_saved_provider_has_no_key(app_module) -> None:
+def test_default_provider_requires_backend_managed_provider(app_module) -> None:
     db.upsert_provider_profile(
         {
             "id": "empty",
@@ -98,12 +97,10 @@ def test_default_provider_falls_back_to_env_when_saved_provider_has_no_key(app_m
         updated_at="2026-07-09T12:00:00",
     )
 
-    prompt, request_params = app_module.build_generate_params(
-        app_module.GenerateRequest(prompt="hello", quality="medium")
-    )
-    public_params = app_module.public_request_params(request_params)
+    with pytest.raises(HTTPException) as exc:
+        app_module.build_generate_params(
+            app_module.GenerateRequest(prompt="hello", quality="medium")
+        )
 
-    assert prompt == "hello"
-    assert public_params["provider_id"] == "default"
-    assert public_params["model"] == "gpt-image-2"
-    assert public_params["quality"] == "medium"
+    assert exc.value.status_code == 500
+    assert "No enabled provider" in str(exc.value.detail)
