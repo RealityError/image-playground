@@ -1649,7 +1649,7 @@ def api_catalog_payload() -> dict[str, Any]:
             "edit_images_field": "image or image[]",
         },
         "parameters": {
-            "supported": ["prompt", "n", "size", "aspect_ratio", "quality", "response_format", "image", "mask"],
+            "supported": ["prompt", "provider_id", "model", "n", "size", "aspect_ratio", "quality", "response_format", "image", "mask"],
             "forwarded_upstream": ["model", "prompt", "n", "size", "quality", "response_format", "image", "mask"],
             "sizes": ["auto", "1024x1024", "1536x1024", "1024x1536", "2048x1152", "1152x2048", "2048x2048", "3840x2160", "2160x3840"],
             "size_constraints": {
@@ -1668,14 +1668,14 @@ def api_catalog_payload() -> dict[str, Any]:
                 "path": "/api/v1/generate",
                 "content_type": "application/json",
                 "description": "Text-to-image generation.",
-                "body": {"prompt": "string", "size": "1024x1024", "quality": "auto", "response_format": "b64_json"},
+                "body": {"prompt": "string", "provider_id": "optional", "model": "optional", "size": "1024x1024", "quality": "auto", "response_format": "b64_json"},
             },
             {
                 "method": "POST",
                 "path": "/api/v1/edit",
                 "content_type": "multipart/form-data",
                 "description": "Image editing with one or more ordered input images.",
-                "fields": {"prompt": "string", "image": "file[]", "mask": "file optional", "size": "optional", "quality": "optional"},
+                "fields": {"prompt": "string", "provider_id": "optional", "model": "optional", "image": "file[]", "mask": "file optional", "size": "optional", "quality": "optional"},
             },
             {"method": "GET", "path": "/api/v1/images/{job_id}/{image_index}", "description": "Fetch generated image with API token."},
             {"method": "GET", "path": "/api/v1/thumbs/{job_id}/{image_index}", "description": "Fetch generated thumbnail with API token."},

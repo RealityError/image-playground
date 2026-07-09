@@ -7,6 +7,7 @@
 ## 与原项目的主要区别
 
 - 新增 FastAPI 后端，统一管理 API Key，用户无需自备
+- 上游配置放在管理后台，API Key 仅管理员可写且不会明文回显
 - 口令空间隔离，多用户共享同一实例
 - 服务端图片存储 + 历史记录持久化
 - 管理控制台（仪表盘、任务管理、图库、空间主管理、运行时配置）
@@ -82,7 +83,7 @@ start.bat
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填入真实配置
+# 编辑 .env 填入启动密钥；上游 API Key 建议进管理后台配置
 
 cd backend
 python3 -m venv .venv
@@ -107,18 +108,24 @@ npm run build
 
 ## 环境变量
 
+`.env` 现在只负责服务启动和默认兜底上游。正式的多上游配置请登录管理后台，在「系统 / 上游配置」里维护；API Key 只允许管理员写入，接口不会明文回显。
+
 ```env
-IMAGE_API_KEY=your-api-key
-IMAGE_API_BASE_URL=https://api.openai.com/v1
-IMAGE_MODEL=gpt-image-2
-IMAGE_API_TIMEOUT=360
-IMAGE_RESPONSE_FORMAT=
-PORT=30116
 OWNER_SECRET=replace-with-a-long-secret
 COOKIE_SIGNING_SECRET=replace-with-another-long-secret
 ADMIN_PASSWORD=replace-with-admin-password
 ADMIN_PAGE_PATH=/admin
+PORT=30116
+
+# 可选：未在管理后台配置上游时使用的默认兜底
+IMAGE_API_KEY=
+IMAGE_API_BASE_URL=https://api.openai.com/v1
+IMAGE_MODEL=gpt-image-2
+IMAGE_API_TIMEOUT=360
+IMAGE_RESPONSE_FORMAT=
 ```
+
+管理后台上游配置支持 `id`、名称、OpenAI-compatible `base_url`、API Key、默认模型、模型列表和参数白名单。参数不在白名单内会直接报错，不会自动降级。
 
 ## API
 

@@ -13,6 +13,7 @@ http://<server-ip>:30116
 - Admin calls use `/admin/*`; the admin page path is configured by `ADMIN_PAGE_PATH` and `GET /admin` intentionally returns 404.
 - API token is the same as the web space passphrase.
 - Web and API calls share the same space, history ownership, block status, and concurrency quota.
+- Upstream providers are configured by admins in the console. API callers may pass `provider_id` and `model`; unsupported provider parameters fail with `400`.
 - Concurrent limit: 3 active generation/edit jobs per space.
 - Generated files are saved locally and served through authenticated image routes.
 
@@ -69,6 +70,8 @@ Request:
 Supported fields:
 
 - `prompt`: required.
+- `provider_id`: optional. Uses the admin-configured default upstream when omitted.
+- `model`: optional. Must be available on the selected upstream.
 - `n`: optional, `1` to `8`.
 - `size`: optional. Use `auto` or `WIDTHxHEIGHT`. Width and height must be multiples of 16, the longest edge can be up to `3840`, aspect ratio must not exceed `3:1`, and total pixels are capped at 4K level. Common values: `1024x1024`, `1536x1024`, `1024x1536`, `2048x2048`, `2048x1152`, `1152x2048`, `3840x2160`, `2160x3840`.
 - `aspect_ratio`: optional alternative to `size`. Supported values: `auto`, `1:1`, `3:2`, `2:3`, `16:9`, `9:16`.
@@ -92,6 +95,8 @@ Required form fields:
 
 Optional form fields:
 
+- `provider_id`
+- `model`
 - `image`: repeat this field to upload multiple input images.
 - `mask`
 - `n`
@@ -128,8 +133,22 @@ curl -X POST "http://127.0.0.1:30116/api/v1/edit" \
   "operation": "edit",
   "prompt": "把背景改成纯白，主体更清晰",
   "model": "gpt-image-2",
+  "provider": {
+    "id": "openai-main",
+    "name": "OpenAI 主上游",
+    "provider_type": "openai-compatible",
+    "default_model": "gpt-image-2",
+    "models": ["gpt-image-2"],
+    "parameters": {
+      "size": ["auto", "1024x1024"],
+      "quality": ["auto", "high"]
+    }
+  },
   "request_params": {
     "model": "gpt-image-2",
+    "provider_id": "openai-main",
+    "provider_name": "OpenAI 主上游",
+    "provider_type": "openai-compatible",
     "prompt": "把背景改成纯白，主体更清晰",
     "size": "1024x1024",
     "quality": "high"
