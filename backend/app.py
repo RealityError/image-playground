@@ -36,6 +36,7 @@ from db import (
     get_input_image,
     get_input_images,
     get_owner_job_detail,
+    get_provider_profile_secret,
     get_runtime_config,
     init_db,
     is_job_deleted,
@@ -45,6 +46,7 @@ from db import (
     list_admin_owners,
     list_auth_events,
     list_history_images,
+    list_provider_profiles,
     log_auth_event,
     log_generation_failed,
     log_generation_finished,
@@ -58,7 +60,17 @@ from db import (
     soft_delete_job,
     soft_delete_owner_job,
     soft_delete_owner_jobs,
+    delete_provider_profile,
     update_image_thumbnail_path,
+    upsert_provider_profile,
+)
+from providers import (
+    DEFAULT_PROVIDER_PARAMETERS,
+    ProviderProfile,
+    build_provider_request,
+    provider_from_request_params,
+    public_request_params,
+    upstream_request_params,
 )
 from storage_paths import (
     BASE_DIR,
@@ -152,6 +164,56 @@ def get_default_response_format() -> str | None:
     return None
 
 
+def build_env_provider_profile() -> ProviderProfile:
+    api_key = get_env("IMAGE_API_KEY") or get_env("OPENAI_API_KEY") or ""
+    base_url = get_env("IMAGE_API_BASE_URL") or ""
+    model = get_model_name()
+    return ProviderProfile(
+        id="default",
+        name="默认线路",
+        provider_type="openai-compatible",
+        base_url=base_url,
+        api_key=api_key,
+        enabled=True,
+        default_model=model,
+        models=[model],
+        parameters=dict(DEFAULT_PROVIDER_PARAMETERS),
+    )
+
+
+def resolve_provider_profile(provider_id: str | None = None) -> ProviderProfile:
+    normalized_id = clean_text(provider_id)
+    if normalized_id:
+        row = get_provider_profile_secret(normalized_id)
+        if row is None:
+            raise HTTPException(status_code=400, detail=f"Provider not found: {normalized_id}.")
+        profile = ProviderProfile.from_mapping(row)
+    else:
+        rows = list_provider_profiles(include_disabled=False, include_secret=True)
+        configured_row = next((row for row in rows if row.get("api_key")), None)
+        profile = ProviderProfile.from_mapping(configured_row) if configured_row else build_env_provider_profile()
+
+    if not profile.enabled:
+        raise HTTPException(status_code=400, detail=f"Provider is disabled: {profile.id}.")
+    if not profile.api_key:
+        raise HTTPException(status_code=500, detail=f"Provider API key is not configured: {profile.id}.")
+    return profile
+
+
+def public_provider_profiles() -> list[dict[str, Any]]:
+    rows = list_provider_profiles(include_disabled=False, include_secret=False)
+    if rows:
+        return [
+            ProviderProfile.from_mapping(row).public_snapshot()
+            for row in rows
+            if row.get("api_key_configured")
+        ]
+    env_profile = build_env_provider_profile()
+    if not env_profile.api_key:
+        return []
+    return [env_profile.public_snapshot()]
+
+
 def get_min_passphrase_length() -> int:
     val = get_runtime_config("min_web_passphrase_length", "")
     if val:
@@ -180,6 +242,8 @@ def apply_web_headers(response: Response) -> Response:
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
+    provider_id: str | None = Field(default=None, max_length=80)
+    model: str | None = Field(default=None, max_length=160)
     n: int | None = Field(default=None, ge=1, le=8)
     size: str | None = None
     aspect_ratio: str | None = None
@@ -243,6 +307,19 @@ class AdminOwnerDeleteRequest(BaseModel):
     owner_type: str = Field(min_length=1, max_length=64)
     owner_id: str = Field(min_length=1, max_length=128)
     reason: str | None = Field(default=None, max_length=1000)
+
+
+class AdminProviderProfileRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    provider_type: str = Field(default="openai-compatible", max_length=80)
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=4000)
+    clear_api_key: bool = False
+    enabled: bool = True
+    default_model: str = Field(min_length=1, max_length=160)
+    models: list[str] = Field(default_factory=list, max_length=50)
+    parameters: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class AdminOwnerTarget(BaseModel):
@@ -430,26 +507,26 @@ def get_admin_page_path() -> str:
     return path
 
 
-def get_client() -> OpenAI:
-    api_key = get_env("IMAGE_API_KEY") or get_env("OPENAI_API_KEY")
+def get_client(provider: ProviderProfile | None = None) -> OpenAI:
+    active_provider = provider or resolve_provider_profile()
+    api_key = active_provider.api_key or get_env("IMAGE_API_KEY") or get_env("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="Missing IMAGE_API_KEY or OPENAI_API_KEY.")
+        raise HTTPException(status_code=500, detail=f"Provider API key is not configured: {active_provider.id}.")
 
     timeout = get_image_api_timeout()
-    base_url = get_env("IMAGE_API_BASE_URL")
     kwargs: dict[str, Any] = {
         "api_key": api_key,
         "http_client": DefaultHttpxClient(trust_env=False),
         "timeout": timeout,
         "max_retries": 0,
     }
-    if base_url:
-        kwargs["base_url"] = base_url
+    if active_provider.base_url:
+        kwargs["base_url"] = active_provider.base_url
     return OpenAI(**kwargs)
 
 
-def describe_image_upstream_error(exc: Exception) -> str:
-    base_url = get_env("IMAGE_API_BASE_URL") or "https://api.openai.com/v1"
+def describe_image_upstream_error(exc: Exception, provider: ProviderProfile | None = None) -> str:
+    base_url = provider.base_url if provider and provider.base_url else get_env("IMAGE_API_BASE_URL") or "https://api.openai.com/v1"
     timeout = get_image_api_timeout()
     if isinstance(exc, APITimeoutError):
         return f"upstream request timed out after {timeout:g}s while connecting to {base_url}"
@@ -1098,6 +1175,9 @@ def build_history_items(owner_type: str, owner_id: str, offset: int, limit: int)
             "filename": local_path.name,
             "size_bytes": row.get("size_bytes"),
             "prompt": row.get("prompt"),
+            "provider_id": row.get("provider_id"),
+            "provider_name_snapshot": row.get("provider_name_snapshot"),
+            "provider_type": row.get("provider_type"),
             "request_params": parse_request_params(row.get("request_params_json")),
             "actual_params": parse_request_params(row.get("response_params_json")),
         }
@@ -1184,8 +1264,10 @@ def build_generate_params(payload: GenerateRequest) -> tuple[str, dict[str, Any]
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required.")
 
+    provider = resolve_provider_profile(payload.provider_id)
+    requested_model = clean_text(payload.model)
     request_params: dict[str, Any] = {
-        "model": get_model_name(),
+        "model": requested_model or provider.default_model,
         "prompt": prompt,
     }
 
@@ -1210,7 +1292,7 @@ def build_generate_params(payload: GenerateRequest) -> tuple[str, dict[str, Any]
         if value is not None:
             request_params[key] = value
 
-    return prompt, request_params
+    return prompt, build_provider_request(provider, request_params)
 
 
 def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[StarletteUploadFile], StarletteUploadFile | None]:
@@ -1229,8 +1311,10 @@ def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[Starlette
     mask_value = form.get("mask")
     mask_upload = mask_value if isinstance(mask_value, StarletteUploadFile) and mask_value.filename else None
 
+    provider = resolve_provider_profile(clean_text(form.get("provider_id")))
+    requested_model = clean_text(form.get("model"))
     request_params: dict[str, Any] = {
-        "model": get_model_name(),
+        "model": requested_model or provider.default_model,
         "prompt": prompt,
     }
 
@@ -1253,7 +1337,7 @@ def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[Starlette
         if value is not None:
             request_params[key] = value
 
-    return prompt, request_params, image_uploads, mask_upload
+    return prompt, build_provider_request(provider, request_params), image_uploads, mask_upload
 
 
 def build_api_owner(request_params: dict[str, Any], ip: str) -> tuple[str, str]:
@@ -1284,9 +1368,11 @@ def create_job(
     prepared_source_hashes: set[str] | None = None,
     cleanup_prepared_paths: bool = False,
 ) -> dict[str, Any]:
-    client = get_client()
+    provider = provider_from_request_params(request_params) or resolve_provider_profile()
+    client = get_client(provider)
     job_id = job_id or build_job_id()
     created_at = created_at or now_iso()
+    stored_request_params = public_request_params(request_params)
 
     temp_paths: list[Path] = []
     source_hashes: set[str] = set(prepared_source_hashes or set())
@@ -1302,11 +1388,14 @@ def create_job(
             owner_type=owner_type,
             owner_id=owner_id,
             prompt=prompt,
-            model=str(request_params.get("model") or get_model_name()),
+            model=str(stored_request_params.get("model") or provider.default_model),
             operation=operation,
-            request_params_json=json.dumps(request_params, ensure_ascii=False),
+            request_params_json=json.dumps(stored_request_params, ensure_ascii=False),
             input_image_count=len(image_uploads or []),
             mask_used=bool(mask_upload),
+            provider_id=provider.id,
+            provider_name_snapshot=provider.name,
+            provider_type=provider.provider_type,
         )
 
     started_at = time.time()
@@ -1332,7 +1421,7 @@ def create_job(
             for image_path in image_paths:
                 open_handles.append(image_path.open("rb"))
 
-            call_params = dict(request_params)
+            call_params = upstream_request_params(request_params)
             if len(open_handles) == 1:
                 call_params["image"] = open_handles[0]
             else:
@@ -1354,9 +1443,9 @@ def create_job(
 
             persist_input_images(job_id, image_paths, mask_path, created_at)
         else:
-            response = client.images.generate(**request_params)
+            response = client.images.generate(**upstream_request_params(request_params))
     except Exception as exc:
-        error_message = describe_image_upstream_error(exc)
+        error_message = describe_image_upstream_error(exc, provider)
         elapsed = round(time.time() - started_at, 2)
         log_generation_failed(
             job_id=job_id,
@@ -1430,8 +1519,9 @@ def create_job(
         "created_at": created_at,
         "operation": operation,
         "prompt": prompt,
-        "model": str(request_params.get("model") or get_model_name()),
-        "request_params": request_params,
+        "model": str(stored_request_params.get("model") or provider.default_model),
+        "provider": provider.public_snapshot(),
+        "request_params": stored_request_params,
         "actual_params": actual_params,
         "elapsed_seconds": elapsed,
         "image_count": len(images),
@@ -1487,6 +1577,9 @@ def serialize_owner_job(detail: dict[str, Any]) -> dict[str, Any]:
         "completed_at": detail.get("completed_at"),
         "operation": detail.get("operation"),
         "prompt": detail.get("prompt"),
+        "provider_id": detail.get("provider_id"),
+        "provider_name_snapshot": detail.get("provider_name_snapshot"),
+        "provider_type": detail.get("provider_type"),
         "model": detail.get("model"),
         "request_params": request_params,
         "actual_params": actual_params,
@@ -1529,6 +1622,7 @@ def serialize_public_api_job(result: dict[str, Any]) -> dict[str, Any]:
         "created_at": result.get("created_at"),
         "operation": result.get("operation"),
         "model": result.get("model"),
+        "provider": result.get("provider"),
         "request_params": result.get("request_params") or {},
         "actual_params": result.get("actual_params") or {},
         "elapsed_seconds": result.get("elapsed_seconds"),
@@ -1734,6 +1828,8 @@ def enqueue_web_job(
     input_image_count: int = 0,
     mask_used: bool = False,
 ) -> dict[str, Any]:
+    provider = provider_from_request_params(request_params) or resolve_provider_profile()
+    stored_request_params = public_request_params(request_params)
     slot_id = acquire_generation_slot(slot_key, "web", owner_ip=ip)
     job_id = build_job_id()
     created_at = now_iso()
@@ -1748,11 +1844,14 @@ def enqueue_web_job(
         owner_type=owner_type,
         owner_id=owner_id,
         prompt=prompt,
-        model=str(request_params.get("model") or get_model_name()),
+        model=str(stored_request_params.get("model") or provider.default_model),
         operation=operation,
-        request_params_json=json.dumps(request_params, ensure_ascii=False),
+        request_params_json=json.dumps(stored_request_params, ensure_ascii=False),
         input_image_count=input_image_count,
         mask_used=mask_used,
+        provider_id=provider.id,
+        provider_name_snapshot=provider.name,
+        provider_type=provider.provider_type,
     )
     set_web_job_state(
         job_id,
@@ -1830,8 +1929,9 @@ def enqueue_web_job(
         "created_at": created_at,
         "operation": operation,
         "prompt": prompt,
-        "model": str(request_params.get("model") or get_model_name()),
-        "request_params": request_params,
+        "model": str(stored_request_params.get("model") or provider.default_model),
+        "provider": provider.public_snapshot(),
+        "request_params": stored_request_params,
         "actual_params": {},
         "scope": "web",
         "request_ip": ip,
@@ -1923,12 +2023,15 @@ def build_system_status() -> dict[str, Any]:
         used_bytes = disk_usage.used
     except Exception:
         total_bytes = free_bytes = used_bytes = 0
+    providers = public_provider_profiles()
+    active_provider = providers[0] if providers else None
     return {
         **get_runtime_status(),
         "version": {
             "web_client_version": WEB_CLIENT_VERSION,
             "api_version": PUBLIC_API_VERSION,
-            "model": get_model_name(),
+            "model": active_provider.get("default_model") if active_provider else get_model_name(),
+            "provider": active_provider,
             "admin_page_path": get_admin_page_path(),
         },
         "storage": {
@@ -2177,6 +2280,13 @@ def web_history(
         "next_offset": offset + len(items),
         "has_more": has_more,
     }
+
+
+@app.get("/web/providers")
+def web_providers(request: Request) -> dict[str, Any]:
+    _, _, _, _ = require_web_owner(request)
+    providers = public_provider_profiles()
+    return {"items": providers, "default_provider_id": providers[0]["id"] if providers else ""}
 
 
 @app.post("/web/generate")
@@ -2908,6 +3018,36 @@ def admin_owner_hard_delete(request: Request, payload: AdminOwnerDeleteRequest) 
         "deleted_jobs": deleted_jobs,
         "removed_files": removed_files,
     }
+
+
+@app.get("/admin/providers")
+def admin_list_providers(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    return {
+        "items": list_provider_profiles(include_disabled=True, include_secret=False),
+        "defaults": {
+            "provider_type": "openai-compatible",
+            "parameters": DEFAULT_PROVIDER_PARAMETERS,
+        },
+    }
+
+
+@app.post("/admin/providers")
+def admin_save_provider(request: Request, payload: AdminProviderProfileRequest) -> dict[str, Any]:
+    require_admin(request)
+    try:
+        raw_payload = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+        profile = upsert_provider_profile(raw_payload, updated_at=now_iso())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "profile": profile}
+
+
+@app.delete("/admin/providers/{provider_id}")
+def admin_delete_provider(request: Request, provider_id: str) -> dict[str, Any]:
+    require_admin(request)
+    deleted = delete_provider_profile(provider_id)
+    return {"ok": deleted, "provider_id": provider_id}
 
 
 @app.get("/admin/auth-events")

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -210,6 +211,20 @@ def init_db() -> None:
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS provider_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider_type TEXT NOT NULL,
+                base_url TEXT,
+                api_key TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                default_model TEXT NOT NULL,
+                models_json TEXT NOT NULL DEFAULT '[]',
+                parameters_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
 
@@ -224,6 +239,9 @@ def init_db() -> None:
         ensure_column(connection, "generation_requests", "deleted_by", "TEXT")
         ensure_column(connection, "generation_requests", "deleted_reason", "TEXT")
         ensure_column(connection, "generation_requests", "files_removed_at", "TEXT")
+        ensure_column(connection, "generation_requests", "provider_id", "TEXT")
+        ensure_column(connection, "generation_requests", "provider_name_snapshot", "TEXT")
+        ensure_column(connection, "generation_requests", "provider_type", "TEXT")
         ensure_column(connection, "generation_images", "thumbnail_path", "TEXT")
         ensure_column(connection, "generation_images", "deleted_at", "TEXT")
         ensure_column(connection, "generation_images", "deleted_by", "TEXT")
@@ -248,6 +266,9 @@ def log_generation_started(
     request_params_json: str,
     input_image_count: int,
     mask_used: bool,
+    provider_id: str | None = None,
+    provider_name_snapshot: str | None = None,
+    provider_type: str | None = None,
 ) -> None:
     with get_connection() as connection:
         connection.execute(
@@ -255,9 +276,10 @@ def log_generation_started(
             INSERT INTO generation_requests (
                 job_id, created_at, scope, route, client_ip, user_agent,
                 owner_type, owner_id, prompt, model, status, operation,
-                request_params_json, input_image_count, mask_used
+                request_params_json, input_image_count, mask_used,
+                provider_id, provider_name_snapshot, provider_type
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -274,6 +296,9 @@ def log_generation_started(
                 request_params_json,
                 input_image_count,
                 1 if mask_used else 0,
+                provider_id,
+                provider_name_snapshot,
+                provider_type,
             ),
         )
 
@@ -428,6 +453,9 @@ def list_history_images(owner_type: str, owner_id: str, offset: int, limit: int)
                 gr.operation,
                 gr.elapsed_seconds,
                 gr.prompt,
+                gr.provider_id,
+                gr.provider_name_snapshot,
+                gr.provider_type,
                 gr.request_params_json,
                 gr.response_params_json,
                 gr.owner_type,
@@ -575,6 +603,9 @@ def list_admin_gallery_images(
                 gr.owner_type,
                 gr.owner_id,
                 gr.prompt,
+                gr.provider_id,
+                gr.provider_name_snapshot,
+                gr.provider_type,
                 gr.model,
                 gr.elapsed_seconds,
                 gr.image_count,
@@ -808,6 +839,9 @@ def list_admin_jobs(
                 gr.owner_type,
                 gr.owner_id,
                 gr.prompt,
+                gr.provider_id,
+                gr.provider_name_snapshot,
+                gr.provider_type,
                 gr.model,
                 gr.status,
                 gr.elapsed_seconds,
@@ -858,6 +892,9 @@ def get_admin_job_detail(job_id: str) -> dict[str, Any] | None:
                 gr.owner_type,
                 gr.owner_id,
                 gr.prompt,
+                gr.provider_id,
+                gr.provider_name_snapshot,
+                gr.provider_type,
                 gr.model,
                 gr.status,
                 gr.elapsed_seconds,
@@ -928,6 +965,9 @@ def get_owner_job_detail(job_id: str, owner_type: str, owner_id: str) -> dict[st
                 owner_type,
                 owner_id,
                 prompt,
+                provider_id,
+                provider_name_snapshot,
+                provider_type,
                 model,
                 status,
                 elapsed_seconds,
@@ -1594,6 +1634,163 @@ def delete_input_images_for_jobs(job_ids: list[str]) -> list[str]:
             tuple(job_ids),
         )
     return paths
+
+
+# ===== Provider Profiles =====
+
+def _safe_json_loads(raw: str | None, fallback: Any) -> Any:
+    if not raw:
+        return fallback
+    try:
+        return json.loads(raw)
+    except Exception:
+        return fallback
+
+
+def _api_key_preview(api_key: str | None) -> str:
+    if not api_key:
+        return ""
+    tail = api_key[-4:] if len(api_key) >= 4 else api_key
+    return f"...{tail}"
+
+
+def _serialize_provider_row(row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
+    payload = dict(row)
+    api_key = str(payload.pop("api_key", "") or "")
+    payload["enabled"] = bool(payload.get("enabled"))
+    payload["models"] = _safe_json_loads(payload.pop("models_json", "[]"), [])
+    payload["parameters"] = _safe_json_loads(payload.pop("parameters_json", "{}"), {})
+    payload["api_key_configured"] = bool(api_key)
+    payload["api_key_preview"] = _api_key_preview(api_key)
+    if include_secret:
+        payload["api_key"] = api_key
+    return payload
+
+
+def list_provider_profiles(*, include_disabled: bool = True, include_secret: bool = False) -> list[dict[str, Any]]:
+    where = "" if include_disabled else "WHERE enabled = 1"
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT *
+            FROM provider_profiles
+            {where}
+            ORDER BY enabled DESC, name COLLATE NOCASE ASC, id ASC
+            """
+        ).fetchall()
+    return [_serialize_provider_row(row, include_secret=include_secret) for row in rows]
+
+
+def get_provider_profile(provider_id: str, *, include_secret: bool = False) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM provider_profiles WHERE id = ?",
+            (provider_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _serialize_provider_row(row, include_secret=include_secret)
+
+
+def get_provider_profile_secret(provider_id: str) -> dict[str, Any] | None:
+    return get_provider_profile(provider_id, include_secret=True)
+
+
+def upsert_provider_profile(profile: dict[str, Any], *, updated_at: str) -> dict[str, Any]:
+    provider_id = str(profile.get("id") or "").strip()
+    name = str(profile.get("name") or "").strip()
+    provider_type = str(profile.get("provider_type") or "openai-compatible").strip()
+    default_model = str(profile.get("default_model") or "").strip()
+    if not provider_id:
+        raise ValueError("provider id is required")
+    if not name:
+        raise ValueError("provider name is required")
+    if provider_type != "openai-compatible":
+        raise ValueError("only openai-compatible provider_type is supported")
+    if not default_model:
+        raise ValueError("default_model is required")
+
+    base_url = str(profile.get("base_url") or "").strip()
+    enabled = 1 if bool(profile.get("enabled", True)) else 0
+    models = profile.get("models")
+    if not isinstance(models, list):
+        models = []
+    normalized_models = [str(item).strip() for item in models if str(item).strip()]
+    if default_model not in normalized_models:
+        normalized_models.insert(0, default_model)
+    parameters = profile.get("parameters")
+    if not isinstance(parameters, dict):
+        parameters = {}
+    normalized_parameters: dict[str, list[str]] = {}
+    for key, values in parameters.items():
+        clean_key = str(key).strip()
+        if not clean_key:
+            continue
+        if isinstance(values, list):
+            normalized_parameters[clean_key] = [str(value).strip() for value in values if str(value).strip()]
+        elif values is True:
+            normalized_parameters[clean_key] = []
+
+    new_api_key = profile.get("api_key")
+    clear_api_key = bool(profile.get("clear_api_key"))
+
+    with get_connection() as connection:
+        existing = connection.execute(
+            "SELECT api_key, created_at FROM provider_profiles WHERE id = ?",
+            (provider_id,),
+        ).fetchone()
+        if clear_api_key:
+            api_key = ""
+        elif new_api_key is not None:
+            api_key = str(new_api_key).strip()
+        elif existing is not None:
+            api_key = str(existing["api_key"] or "")
+        else:
+            api_key = ""
+        created_at = str(existing["created_at"]) if existing is not None else updated_at
+        connection.execute(
+            """
+            INSERT INTO provider_profiles (
+                id, name, provider_type, base_url, api_key, enabled,
+                default_model, models_json, parameters_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                provider_type = excluded.provider_type,
+                base_url = excluded.base_url,
+                api_key = excluded.api_key,
+                enabled = excluded.enabled,
+                default_model = excluded.default_model,
+                models_json = excluded.models_json,
+                parameters_json = excluded.parameters_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                provider_id,
+                name,
+                provider_type,
+                base_url,
+                api_key,
+                enabled,
+                default_model,
+                json.dumps(normalized_models, ensure_ascii=False),
+                json.dumps(normalized_parameters, ensure_ascii=False),
+                created_at,
+                updated_at,
+            ),
+        )
+
+    saved = get_provider_profile(provider_id)
+    if saved is None:
+        raise RuntimeError("failed to save provider profile")
+    return saved
+
+
+def delete_provider_profile(provider_id: str) -> bool:
+    with get_connection() as connection:
+        cursor = connection.execute("DELETE FROM provider_profiles WHERE id = ?", (provider_id,))
+        return bool(cursor.rowcount)
 
 
 # ===== Runtime Config =====

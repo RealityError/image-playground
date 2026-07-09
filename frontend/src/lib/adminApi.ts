@@ -274,6 +274,29 @@ export interface AdminConfigResponse {
   items: AdminConfigItem[]
 }
 
+export interface AdminProviderProfile {
+  id: string
+  name: string
+  provider_type: string
+  base_url?: string | null
+  enabled: boolean
+  default_model: string
+  models: string[]
+  parameters: Record<string, string[]>
+  api_key_configured?: boolean
+  api_key_preview?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AdminProvidersResponse {
+  items: AdminProviderProfile[]
+  defaults?: {
+    provider_type?: string
+    parameters?: Record<string, string[]>
+  }
+}
+
 export async function getAdminConfig(): Promise<AdminConfigResponse> {
   const raw = await adminJson('/admin/config')
   const config: Record<string, string> = raw.config ?? {}
@@ -294,5 +317,23 @@ export async function setAdminConfig(config: Record<string, string | number>): P
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
+  })
+}
+
+export async function getAdminProviders(): Promise<AdminProvidersResponse> {
+  return adminJson('/admin/providers')
+}
+
+export async function saveAdminProvider(profile: Partial<AdminProviderProfile> & { api_key?: string; clear_api_key?: boolean }) {
+  return adminJson('/admin/providers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  })
+}
+
+export async function deleteAdminProvider(providerId: string) {
+  return adminJson(`/admin/providers/${encodeURIComponent(providerId)}`, {
+    method: 'DELETE',
   })
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { initStore, recoverRunningServerTasks } from './store'
+import { initStore, loadProviderProfiles, recoverRunningServerTasks } from './store'
 import { useStore } from './store'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
@@ -77,6 +77,7 @@ export default function App() {
         setOwnerHint(data.owner_hint || '')
         setUnlockStatus(data.unlocked ? '' : '输入口令进入')
         if (data.unlocked) {
+          await loadProviderProfiles()
           const tasks = await loadServerHistory(WEB_CLIENT_VERSION, useStore.getState().tasks)
           useStore.getState().setTasks([...tasks].sort((a, b) => b.createdAt - a.createdAt))
           recoverRunningServerTasks()
@@ -136,6 +137,7 @@ export default function App() {
       setOwnerHint(data.owner_hint || '')
       setPassphrase('')
       setUnlockStatus('')
+      await loadProviderProfiles()
       const tasks = await loadServerHistory(WEB_CLIENT_VERSION, useStore.getState().tasks)
       useStore.getState().setTasks([...tasks].sort((a, b) => b.createdAt - a.createdAt))
       recoverRunningServerTasks()

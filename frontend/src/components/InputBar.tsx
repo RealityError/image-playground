@@ -310,6 +310,7 @@ export default function InputBar() {
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
+  const providers = useStore((s) => s.providers)
   const settings = useStore((s) => s.settings)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const showToast = useStore((s) => s.showToast)
@@ -459,6 +460,8 @@ export default function InputBar() {
   // 派生值
   // ==========================================================================
   const userConcurrencyLimit = useStore((s) => s.serverStats.userConcurrencyLimit)
+  const activeProvider = providers.find((provider) => provider.id === params.providerId) || providers[0]
+  const activeModels = activeProvider?.models?.length ? activeProvider.models : activeProvider?.default_model ? [activeProvider.default_model] : []
   const canSubmit = Boolean(prompt.trim())
   const outputImageLimit = getOutputImageLimitForSettings(settings, userConcurrencyLimit)
   const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
@@ -1431,6 +1434,37 @@ export default function InputBar() {
     )
   }
 
+  const renderProviderDropdown = () => (
+    <select
+      value={activeProvider?.id || ''}
+      onChange={(e) => {
+        const provider = providers.find((item) => item.id === e.target.value)
+        setParams({ providerId: provider?.id, model: provider?.default_model || provider?.models?.[0] })
+      }}
+      disabled={providers.length <= 1}
+      className={`${baseControlClass} w-full truncate`}
+    >
+      {providers.length === 0 && <option value="">默认线路</option>}
+      {providers.map((provider) => (
+        <option key={provider.id} value={provider.id}>{provider.name}</option>
+      ))}
+    </select>
+  )
+
+  const renderModelDropdown = () => (
+    <select
+      value={params.model || activeProvider?.default_model || activeModels[0] || ''}
+      onChange={(e) => setParams({ model: e.target.value })}
+      disabled={activeModels.length <= 1}
+      className={`${baseControlClass} w-full truncate font-mono`}
+    >
+      {activeModels.length === 0 && <option value="">默认模型</option>}
+      {activeModels.map((model) => (
+        <option key={model} value={model}>{model}</option>
+      ))}
+    </select>
+  )
+
   const renderNInput = () => (
     <div className="relative">
       <input
@@ -1463,6 +1497,14 @@ export default function InputBar() {
 
   const renderParams = (cols: string) => (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">线路</span>
+        {renderProviderDropdown()}
+      </label>
+      <label className="relative flex flex-col gap-0.5">
+        <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">模型</span>
+        {renderModelDropdown()}
+      </label>
       <label className="relative flex flex-col gap-0.5">
         <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">尺寸</span>
         {renderSizeDropdown()}
@@ -1705,7 +1747,7 @@ export default function InputBar() {
           <div className="mt-2">
             {/* 桌面端 */}
             <div className="hidden sm:flex items-end justify-between gap-3">
-              {renderParams('grid-cols-3')}
+              {renderParams('grid-cols-5')}
 
               <div className="flex gap-2 flex-shrink-0 mb-0.5">
                 <div
@@ -1752,7 +1794,7 @@ export default function InputBar() {
             <div className="sm:hidden flex flex-col gap-2">
               <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
                 <div className="collapse-inner">
-                  {renderParams('grid-cols-3')}
+                  {renderParams('grid-cols-2')}
                   <div className="h-2" />
                 </div>
               </div>

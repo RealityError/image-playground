@@ -17,6 +17,9 @@ interface ServerHistoryItem {
   width?: number
   height?: number
   prompt?: string
+  provider_id?: string
+  provider_name_snapshot?: string
+  provider_type?: string
   request_params?: Partial<TaskRecord['params']>
   actual_params?: ActualTaskParams
   elapsed_seconds?: number
@@ -30,6 +33,9 @@ interface ServerHistoryJob {
   created_at?: string
   operation?: string
   prompt?: string
+  provider_id?: string
+  provider_name_snapshot?: string
+  provider_type?: string
   model?: string
   request_params?: Partial<TaskRecord['params']>
   actual_params?: ActualTaskParams
@@ -107,6 +113,9 @@ function historyItemToTask(item: ServerHistoryItem): TaskRecord | null {
     id: jobId,
     prompt: item.prompt || '',
     params: { ...DEFAULT_PARAMS, ...(requestParams || {}) },
+    providerId: item.provider_id || requestParams?.providerId,
+    providerName: item.provider_name_snapshot,
+    model: requestParams?.model,
     actualParams,
     actualParamsByImage: actualParams ? { [imageId]: actualParams } : undefined,
     outputImageDimensions: imageDimensions,
@@ -136,6 +145,9 @@ function historyJobToTask(job: ServerHistoryJob): TaskRecord | null {
     id: jobId,
     prompt: job.prompt || '',
     params: { ...DEFAULT_PARAMS, ...(requestParams || {}) },
+    providerId: job.provider_id || requestParams?.providerId,
+    providerName: job.provider_name_snapshot,
+    model: job.model || requestParams?.model,
     actualParams,
     operation: job.operation,
     inputImageIds: [],

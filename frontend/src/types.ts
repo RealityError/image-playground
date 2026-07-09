@@ -9,9 +9,20 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system'
 }
 
+export interface ProviderProfile {
+  id: string
+  name: string
+  provider_type: string
+  default_model: string
+  models: string[]
+  parameters?: Record<string, string[]>
+}
+
 // ===== 任务参数 =====
 
 export interface TaskParams {
+  providerId?: string
+  model?: string
   size: string
   quality: 'auto' | 'low' | 'medium' | 'high' | 'standard' | 'hd'
   n: number
@@ -57,6 +68,9 @@ export interface TaskRecord {
   /** 输出图片对应的实际像素尺寸，key 为 outputImages 中的图片 id */
   outputImageDimensions?: Record<string, { width: number; height: number }>
   operation?: 'generate' | 'reference' | 'edit' | string
+  providerId?: string
+  providerName?: string
+  model?: string
   /** 可恢复任务标记，兼容旧记录 */
   falRecoverable?: boolean
   customRecoverable?: boolean

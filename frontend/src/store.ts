@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
-import type { ActualTaskParams, AppSettings, TaskParams, InputImage, MaskDraft, TaskRecord, StoredImageThumbnail, ExportData } from './types'
+import type { ActualTaskParams, AppSettings, TaskParams, InputImage, MaskDraft, TaskRecord, StoredImageThumbnail, ExportData, ProviderProfile } from './types'
 import { DEFAULT_PARAMS } from './types'
 import {
   getAllTasks,
@@ -206,6 +206,31 @@ function scheduleBackfill(imageIds: string[]) {
 
 // ===== Helpers =====
 
+export async function loadProviderProfiles() {
+  try {
+    const payload = await webJson('/web/providers')
+    const providers = Array.isArray(payload.items) ? payload.items as ProviderProfile[] : []
+    const currentParams = useStore.getState().params
+    const currentProvider = providers.find((provider) => provider.id === currentParams.providerId)
+    const nextProvider = currentProvider || providers[0]
+    const nextModel = nextProvider
+      ? nextProvider.models.includes(currentParams.model || '')
+        ? currentParams.model
+        : nextProvider.default_model || nextProvider.models[0]
+      : currentParams.model
+    useStore.setState({
+      providers,
+      params: {
+        ...currentParams,
+        providerId: nextProvider?.id,
+        model: nextModel,
+      },
+    })
+  } catch {
+    useStore.setState({ providers: [] })
+  }
+}
+
 function genId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
@@ -294,6 +319,8 @@ interface AppState {
 
   params: TaskParams
   setParams: (p: Partial<TaskParams>) => void
+  providers: ProviderProfile[]
+  setProviders: (providers: ProviderProfile[]) => void
 
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
@@ -404,6 +431,8 @@ export const useStore = create<AppState>()(
 
       params: { ...DEFAULT_PARAMS },
       setParams: (p) => set((state) => ({ params: { ...state.params, ...p } })),
+      providers: [],
+      setProviders: (providers) => set({ providers }),
 
       tasks: [],
       setTasks: (tasks) => set({ tasks }),
@@ -584,6 +613,9 @@ async function applyTaskResult(taskId: string, result: CallApiResult) {
     serverJobId: jobId || undefined,
     serverImageUrls: Object.keys(serverImageUrls).length ? serverImageUrls : undefined,
     serverThumbnailUrls: Object.keys(serverThumbnailUrls).length ? serverThumbnailUrls : undefined,
+    providerId: result.provider?.id || task.providerId,
+    providerName: result.provider?.name || task.providerName,
+    model: task.params.model || task.model,
     actualParams,
     actualParamsByImage: Object.keys(actualParamsByImage).length ? actualParamsByImage : undefined,
     revisedPromptByImage: Object.keys(revisedPromptByImage).length ? revisedPromptByImage : undefined,
@@ -730,7 +762,7 @@ async function cleanOrphanImages() {
 
 export async function submitTask(options?: { allowFullMask?: boolean }) {
   const state = useStore.getState()
-  const { prompt, inputImages, maskDraft, params, settings, serverStats } = state
+  const { prompt, inputImages, maskDraft, params, settings, serverStats, providers } = state
 
   if (!prompt.trim() && inputImages.length === 0) {
     useStore.getState().showToast('请输入提示词或添加图片', 'error')
@@ -776,6 +808,9 @@ export async function submitTask(options?: { allowFullMask?: boolean }) {
       id: genId(),
       prompt: prompt.trim(),
       params: { ...params, n: 1 },
+      providerId: params.providerId,
+      providerName: providers.find((provider) => provider.id === params.providerId)?.name,
+      model: params.model,
       operation: maskImageId ? 'edit' : inputImageIds.length > 0 ? 'reference' : 'generate',
       inputImageIds,
       maskTargetImageId,

@@ -24,6 +24,12 @@ export interface CallApiResult {
   createdAt?: string
   completedAt?: string
   elapsedSeconds?: number
+  provider?: {
+    id?: string
+    name?: string
+    provider_type?: string
+    default_model?: string
+  }
 }
 
 function formatMiB(bytes: number): string {
