@@ -145,74 +145,11 @@ def get_model_name() -> str:
     return get_env("IMAGE_MODEL", "gpt-image-2") or "gpt-image-2"
 
 
-def is_nowcoding_base_url() -> bool:
-    base_url = (get_env("IMAGE_API_BASE_URL", "") or "").lower()
-    return "nowcoding.ai" in base_url
-
-
 def get_default_response_format() -> str | None:
     configured = clean_text(get_env("IMAGE_RESPONSE_FORMAT"))
     if configured:
         return configured
-    if is_nowcoding_base_url():
-        return "b64_json"
     return None
-
-
-def get_upstream_quality_field() -> str:
-    configured = clean_text(get_env("IMAGE_QUALITY_FIELD"))
-    if configured:
-        return configured
-    if is_nowcoding_base_url():
-        return "thinking"
-    return "quality"
-
-
-def map_upstream_quality(value: str, field_name: str) -> str | None:
-    normalized = value.strip().lower()
-    if field_name == "thinking":
-        return {
-            "auto": None,
-            "none": "none",
-            "minimal": "minimal",
-            "low": "low",
-            "medium": "medium",
-            "standard": "medium",
-            "high": "high",
-            "hd": "xhigh",
-            "xhigh": "xhigh",
-        }.get(normalized, normalized)
-    return value
-
-
-def build_upstream_image_params(request_params: dict[str, Any]) -> dict[str, Any]:
-    call_params = dict(request_params)
-    extra_body = call_params.get("extra_body")
-    if isinstance(extra_body, dict):
-        next_extra_body = dict(extra_body)
-    else:
-        next_extra_body = {}
-    call_params.pop("extra_body", None)
-
-    quality_field = get_upstream_quality_field()
-    explicit_thinking = clean_text(call_params.pop("thinking", None))
-    quality_value = clean_text(call_params.get("quality"))
-
-    if quality_field != "quality":
-        call_params.pop("quality", None)
-        upstream_quality = (
-            map_upstream_quality(explicit_thinking, quality_field)
-            if explicit_thinking
-            else (map_upstream_quality(quality_value, quality_field) if quality_value else None)
-        )
-        if upstream_quality:
-            next_extra_body[quality_field] = upstream_quality
-    elif explicit_thinking:
-        next_extra_body["thinking"] = explicit_thinking
-
-    if next_extra_body:
-        call_params["extra_body"] = next_extra_body
-    return call_params
 
 
 def get_min_passphrase_length() -> int:
@@ -247,7 +184,6 @@ class GenerateRequest(BaseModel):
     size: str | None = None
     aspect_ratio: str | None = None
     quality: str | None = None
-    thinking: str | None = None
     output_format: str | None = None
     output_compression: int | None = Field(default=None, ge=0, le=100)
     background: str | None = None
@@ -329,7 +265,7 @@ class JobDeletedError(RuntimeError):
 
 
 app = FastAPI(
-    title="GPT Image Service",
+    title="image-playground",
     version="0.4.0",
     description="Local image generation and editing service with passphrase-isolated web history and admin console.",
 )
@@ -1260,7 +1196,6 @@ def build_generate_params(payload: GenerateRequest) -> tuple[str, dict[str, Any]
     optional_values = {
         "n": payload.n,
         "quality": clean_text(payload.quality),
-        "thinking": clean_text(payload.thinking),
         "background": clean_text(payload.background),
         "output_format": clean_text(payload.output_format),
         "output_compression": payload.output_compression,
@@ -1306,7 +1241,6 @@ def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[Starlette
     optional_values: dict[str, Any] = {
         "n": parse_optional_int(form.get("n"), "n", 1, 8),
         "quality": clean_text(form.get("quality")),
-        "thinking": clean_text(form.get("thinking")),
         "background": clean_text(form.get("background")),
         "output_format": clean_text(form.get("output_format")),
         "output_compression": parse_optional_int(form.get("output_compression"), "output_compression", 0, 100),
@@ -1398,7 +1332,7 @@ def create_job(
             for image_path in image_paths:
                 open_handles.append(image_path.open("rb"))
 
-            call_params = build_upstream_image_params(request_params)
+            call_params = dict(request_params)
             if len(open_handles) == 1:
                 call_params["image"] = open_handles[0]
             else:
@@ -1420,7 +1354,7 @@ def create_job(
 
             persist_input_images(job_id, image_paths, mask_path, created_at)
         else:
-            response = client.images.generate(**build_upstream_image_params(request_params))
+            response = client.images.generate(**request_params)
     except Exception as exc:
         error_message = describe_image_upstream_error(exc)
         elapsed = round(time.time() - started_at, 2)
@@ -1605,7 +1539,7 @@ def serialize_public_api_job(result: dict[str, Any]) -> dict[str, Any]:
 
 def api_catalog_payload() -> dict[str, Any]:
     return {
-        "name": "gpt-image-2 image service",
+        "name": "image-playground",
         "api_version": PUBLIC_API_VERSION,
         "base_path": "/api/v1",
         "auth": {
@@ -1621,8 +1555,8 @@ def api_catalog_payload() -> dict[str, Any]:
             "edit_images_field": "image or image[]",
         },
         "parameters": {
-            "supported": ["prompt", "n", "size", "aspect_ratio", "quality", "thinking", "response_format", "image", "mask"],
-            "forwarded_upstream": ["model", "prompt", "n", "size", "quality", "thinking", "response_format", "image", "mask"],
+            "supported": ["prompt", "n", "size", "aspect_ratio", "quality", "response_format", "image", "mask"],
+            "forwarded_upstream": ["model", "prompt", "n", "size", "quality", "response_format", "image", "mask"],
             "sizes": ["auto", "1024x1024", "1536x1024", "1024x1536", "2048x1152", "1152x2048", "2048x2048", "3840x2160", "2160x3840"],
             "size_constraints": {
                 "format": "WIDTHxHEIGHT",
@@ -1647,7 +1581,7 @@ def api_catalog_payload() -> dict[str, Any]:
                 "path": "/api/v1/edit",
                 "content_type": "multipart/form-data",
                 "description": "Image editing with one or more ordered input images.",
-                "fields": {"prompt": "string", "image": "file[]", "mask": "file optional", "size": "optional", "quality": "optional", "thinking": "optional"},
+                "fields": {"prompt": "string", "image": "file[]", "mask": "file optional", "size": "optional", "quality": "optional"},
             },
             {"method": "GET", "path": "/api/v1/images/{job_id}/{image_index}", "description": "Fetch generated image with API token."},
             {"method": "GET", "path": "/api/v1/thumbs/{job_id}/{image_index}", "description": "Fetch generated thumbnail with API token."},
@@ -1663,7 +1597,7 @@ def api_docs_html() -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>gpt-image-2 API</title>
+  <title>image-playground API</title>
   <style>
     :root {{ color-scheme: light dark; --bg:#f7f4ee; --ink:#171717; --muted:#6b665f; --card:rgba(255,255,255,.78); --line:rgba(23,23,23,.10); --accent:#0f766e; }}
     @media (prefers-color-scheme: dark) {{ :root {{ --bg:#0d1117; --ink:#f4f4f5; --muted:#a1a1aa; --card:rgba(24,24,27,.78); --line:rgba(255,255,255,.10); --accent:#5eead4; }} }}
@@ -1687,7 +1621,7 @@ def api_docs_html() -> str:
   <main>
     <section class="hero">
       <div>
-        <h1>gpt-image-2 API</h1>
+        <h1>image-playground API</h1>
         <p>面向程序调用的图片生成与编辑接口。网页端走 <code>/web/*</code>，公开 API 只走 <code>/api/v1/*</code>。API Token 使用你的网页空间口令，Web 和 API 共用同一个空间、历史归属、封禁和并发限制。</p>
       </div>
       <div class="grid">

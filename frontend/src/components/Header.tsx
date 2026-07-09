@@ -13,7 +13,7 @@ export default function Header() {
           <div className="flex-1 min-w-0 pr-2">
             <h1 className="inline-flex items-start relative">
               <span className="text-[17px] sm:text-lg font-bold tracking-tight text-gray-800 dark:text-gray-100">
-                gpt-image-2
+                image-playground
               </span>
             </h1>
           </div>

@@ -162,7 +162,7 @@ export default function App() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/70 backdrop-blur px-4">
           <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-950 border border-gray-200 dark:border-white/10 shadow-2xl p-5 space-y-4">
             <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">gpt-image-2</h2>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">image-playground</h2>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">输入空间口令后使用</p>
             </div>
             <input

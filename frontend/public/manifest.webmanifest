@@ -1,7 +1,7 @@
 {
-  "name": "GPT Image Playground",
-  "short_name": "GPT Image",
-  "description": "GPT Image Playground 图像生成工作台",
+  "name": "image-playground",
+  "short_name": "image-playground",
+  "description": "image-playground 图像生成工作台",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

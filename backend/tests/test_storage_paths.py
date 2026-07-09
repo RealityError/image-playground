@@ -12,7 +12,7 @@ def test_storage_path_for_db_stores_generated_paths_relative() -> None:
 
 
 def test_normalize_legacy_absolute_path_under_backend_root() -> None:
-    legacy_path = r"C:\Users\whitecat\Desktop\project\gpt-image-playground\backend\thumbnails\job_1.webp"
+    legacy_path = r"C:\Users\whitecat\Desktop\project\image-playground\backend\thumbnails\job_1.webp"
 
     assert normalize_storage_path(legacy_path, {"thumbnails"}) == "thumbnails/job_1.webp"
 
@@ -31,7 +31,7 @@ def test_db_migration_normalizes_only_known_storage_roots() -> None:
         CREATE TABLE input_images (saved_path TEXT);
         """
     )
-    legacy_root = r"C:\Users\whitecat\Desktop\project\gpt-image-playground"
+    legacy_root = r"C:\Users\whitecat\Desktop\project\image-playground"
     connection.execute(
         "INSERT INTO generation_images VALUES (?, ?)",
         (

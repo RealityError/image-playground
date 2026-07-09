@@ -1,4 +1,4 @@
-# GPT Image Playground
+# image-playground
 
 基于 [CookSleep/gpt_image_playground](https://github.com/CookSleep/gpt_image_playground) 改造的多用户图片生成与编辑服务。
 
@@ -13,12 +13,11 @@
 - 并发控制（每用户生成上限可动态调整）
 - 遮罩编辑与参考图在详情中可回溯查看
 - 详情页解析请求参数、API 实际响应、token 用量和原始 JSON，便于排查不同上游的行为差异
-- 适配 NowCoding 的 `thinking` 质量参数，同时保留 OpenAI 兼容接口路径
 
 ## 目录结构
 
 ```
-gpt-image-playground/
+image-playground/
 ├── backend/          # FastAPI 后端
 │   ├── app.py        # 主服务
 │   ├── db.py         # SQLite 数据层
@@ -114,29 +113,11 @@ IMAGE_API_BASE_URL=https://api.openai.com/v1
 IMAGE_MODEL=gpt-image-2
 IMAGE_API_TIMEOUT=360
 IMAGE_RESPONSE_FORMAT=
-IMAGE_QUALITY_FIELD=
 PORT=30116
 OWNER_SECRET=replace-with-a-long-secret
 COOKIE_SIGNING_SECRET=replace-with-another-long-secret
 ADMIN_PASSWORD=replace-with-admin-password
 ADMIN_PAGE_PATH=/admin
-```
-
-### NowCoding 适配
-
-当 `IMAGE_API_BASE_URL` 指向 `https://nowcoding.ai/v1` 时，服务会自动进行兼容处理：
-
-- 生图接口和 OpenAI SDK 一样走 `/images/generations`
-- 编辑/参考图接口和 OpenAI SDK 一样走 `/images/edits`
-- 不需要为 NowCoding 单独改接口路径，只需要把 `IMAGE_API_BASE_URL` 改成 `https://nowcoding.ai/v1`
-- 默认补充 `response_format=b64_json`
-- 将前端的质量选项转换为 NowCoding 使用的 `thinking` 字段，例如 `quality=high` 会转为 `thinking=high`，`quality=hd` 会转为 `thinking=xhigh`
-
-如需手动指定兼容字段，可通过环境变量覆盖：
-
-```env
-IMAGE_RESPONSE_FORMAT=b64_json
-IMAGE_QUALITY_FIELD=thinking
 ```
 
 ## API

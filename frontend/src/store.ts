@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 const IMAGE_CACHE_MAX = 8
 const THUMBNAIL_CACHE_MAX = 80
 const WEB_RECOVERY_INTERVAL = 2000
-const PERSIST_STORAGE_KEY = 'gpt-image-playground'
+const PERSIST_STORAGE_KEY = 'image-playground'
 
 const safeLocalStorage = {
   getItem: (name: string) => localStorage.getItem(name),
@@ -1116,7 +1116,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `gpt-image-playground-${formatExportFileTime(new Date(exportedAt))}.zip`
+    a.download = `image-playground-${formatExportFileTime(new Date(exportedAt))}.zip`
     a.click()
     URL.revokeObjectURL(url)
     showToast('数据已导出', 'success')

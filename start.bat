@@ -2,7 +2,7 @@
 setlocal
 
 cd /d "%~dp0"
-title GPT Image Playground
+title image-playground
 
 set "ROOT=%~dp0"
 set "BACKEND=%ROOT%backend"
@@ -33,7 +33,7 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%ROOT%.env") do (
 )
 
 echo.
-echo === GPT Image Playground ===
+echo === image-playground ===
 echo Project: %ROOT%
 echo Port:    %PORT%
 echo.

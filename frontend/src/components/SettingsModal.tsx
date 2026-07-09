@@ -311,14 +311,14 @@ export default function SettingsModal() {
                     <div className="mb-5 flex h-[88px] w-[88px] items-center justify-center rounded-full border border-gray-200/80 bg-gray-50/50 text-gray-800 transition-colors dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-gray-100">
                       <GithubIcon className="h-11 w-11" />
                     </div>
-                    <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">gpt-image-2</h4>
+                    <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">image-playground</h4>
                     <p className="mt-1.5 text-[13px] text-gray-500 dark:text-gray-400">
-                      前端基于 GPT Image Playground 改造
+                      多用户图片生成与编辑工作台
                     </p>
                   </div>
 
                   <p className="mt-8 mb-6 max-w-[360px] text-center text-[13px] leading-relaxed text-gray-500 dark:text-gray-400">
-                    感谢 CookSleep 开源的 GPT Image Playground，原项目采用 MIT 许可证。
+                    感谢 CookSleep 开源的原项目，原项目采用 MIT 许可证。
                   </p>
 
                   <div className="flex flex-wrap items-center justify-center gap-3">
