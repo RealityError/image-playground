@@ -3,6 +3,7 @@ import { useStore, getCachedImage, ensureImageCached } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { getHorizontalSwipeAction } from '../lib/lightboxSwipe'
 import { EditIcon } from './icons'
 
 const MIN_SCALE = 1
@@ -212,6 +213,7 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
   const tapRef = useRef({ time: 0, x: 0, y: 0 })
   const hadMultiTouchRef = useRef(false)
   const touchStartedOnImageRef = useRef(false)
+  const swipeTouchRef = useRef<{ x: number; y: number } | null>(null)
 
   // 判断本次 mousedown → mouseup 是否发生了拖拽，用于区分点击和拖拽
   const didDragRef = useRef(false)
@@ -378,6 +380,7 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
         const now = Date.now()
         const prev = tapRef.current
         touchStartedOnImageRef.current = e.target instanceof HTMLImageElement
+        swipeTouchRef.current = { x: t.clientX, y: t.clientY }
 
         // 双击检测
         if (
@@ -438,6 +441,25 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
           tapRef.current = { time: 0, x: 0, y: 0 }
           return
         }
+        const start = swipeTouchRef.current
+        const changed = e.changedTouches[0]
+        swipeTouchRef.current = null
+        if (showNav && scaleRef.current <= 1 && start && changed) {
+          const action = getHorizontalSwipeAction({
+            deltaX: changed.clientX - start.x,
+            deltaY: changed.clientY - start.y,
+          })
+          if (action === 'prev') {
+            onPrev()
+            tapRef.current = { time: 0, x: 0, y: 0 }
+            return
+          }
+          if (action === 'next') {
+            onNext()
+            tapRef.current = { time: 0, x: 0, y: 0 }
+            return
+          }
+        }
         // 单击关闭：未缩放时任意位置关闭；缩放时仅点击图片外关闭。
         if (scaleRef.current <= 1 || !touchStartedOnImageRef.current) {
           const prev = tapRef.current
@@ -460,7 +482,7 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
       el.removeEventListener('touchmove', onTouchMove)
       el.removeEventListener('touchend', onTouchEnd)
     }
-  }, [apply, getCenter, onClose])
+  }, [apply, getCenter, onClose, onNext, onPrev, showNav])
 
   const s = scaleRef.current
   const tx = txRef.current

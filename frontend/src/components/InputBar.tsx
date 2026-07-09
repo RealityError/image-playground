@@ -18,6 +18,7 @@ import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { getSafeBoundingClientRect } from '../lib/domRect'
+import { getFailedTaskIds } from '../lib/taskFilters'
 import SizePickerModal from './SizePickerModal'
 import ViewportTooltip from './ViewportTooltip'
 
@@ -407,6 +408,25 @@ export default function InputBar() {
     }
     clearSelection()
   }, [tasks, selectedTaskIds, showToast, clearSelection])
+
+  const handleClearFailedTasks = useCallback(() => {
+    const failedTaskIds = getFailedTaskIds(tasks)
+    if (!failedTaskIds.length) {
+      showToast('没有失败记录需要清理', 'info')
+      return
+    }
+
+    setConfirmDialog({
+      title: '清理失败记录',
+      message: `确定要删除 ${failedTaskIds.length} 条失败记录吗？已完成和生成中的记录不会受影响。`,
+      confirmText: '清理',
+      tone: 'warning',
+      action: () => {
+        void removeMultipleTasks(failedTaskIds)
+        clearSelection()
+      },
+    })
+  }, [clearSelection, setConfirmDialog, showToast, tasks])
 
   // ==========================================================================
   // Refs
@@ -1563,6 +1583,18 @@ export default function InputBar() {
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </button>
+              <button
+                onClick={handleClearFailedTasks}
+                className="p-2 text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors"
+                title="清理全部失败记录"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11l4 4m0-4l-4 4" />
                 </svg>
               </button>
               <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
