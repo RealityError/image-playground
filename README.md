@@ -108,7 +108,7 @@ npm run build
 
 ## 环境变量
 
-`.env` 只负责服务器配置，例如启动密钥、端口、Cookie 安全开关、请求超时和口令长度。上游 provider 单独保存在后端数据库里，请登录管理后台，在「系统 / 上游配置」里维护；API Key 只允许管理员写入，接口不会明文回显。
+`.env` 只负责服务器配置，例如启动密钥、端口、Cookie 安全开关、请求超时和口令长度。上游和模型配置单独保存在后端数据库里，请登录管理后台，在「系统 / 上游配置」「模型配置」里维护；API Key 只允许管理员写入，接口不会明文回显。
 
 ```env
 OWNER_SECRET=replace-with-a-long-secret
@@ -121,7 +121,7 @@ MIN_WEB_PASSPHRASE_LENGTH=6
 COOKIE_SECURE=0
 ```
 
-管理后台上游配置支持 `id`、名称、OpenAI-compatible `base_url`、API Key、默认模型、模型列表和参数白名单。参数不在白名单内会直接报错，不会自动降级。
+管理后台上游配置支持 `id`、名称、OpenAI-compatible `base_url` 和 API Key。模型配置绑定某个上游，支持模型 ID、显示名称、参数模板和参数白名单。参数不在白名单内会直接报错，不会自动降级。
 
 ## API
 

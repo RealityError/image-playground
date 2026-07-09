@@ -310,7 +310,7 @@ export default function InputBar() {
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
-  const providers = useStore((s) => s.providers)
+  const modelProfiles = useStore((s) => s.modelProfiles)
   const settings = useStore((s) => s.settings)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const showToast = useStore((s) => s.showToast)
@@ -460,8 +460,7 @@ export default function InputBar() {
   // 派生值
   // ==========================================================================
   const userConcurrencyLimit = useStore((s) => s.serverStats.userConcurrencyLimit)
-  const activeProvider = providers.find((provider) => provider.id === params.providerId) || providers[0]
-  const activeModels = activeProvider?.models?.length ? activeProvider.models : activeProvider?.default_model ? [activeProvider.default_model] : []
+  const activeModelProfile = modelProfiles.find((model) => model.id === params.modelProfileId) || modelProfiles[0]
   const canSubmit = Boolean(prompt.trim())
   const outputImageLimit = getOutputImageLimitForSettings(settings, userConcurrencyLimit)
   const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
@@ -1434,33 +1433,19 @@ export default function InputBar() {
     )
   }
 
-  const renderProviderDropdown = () => (
+  const renderModelProfileDropdown = () => (
     <select
-      value={activeProvider?.id || ''}
+      value={activeModelProfile?.id || ''}
       onChange={(e) => {
-        const provider = providers.find((item) => item.id === e.target.value)
-        setParams({ providerId: provider?.id, model: provider?.default_model || provider?.models?.[0] })
+        const model = modelProfiles.find((item) => item.id === e.target.value)
+        setParams({ modelProfileId: model?.id, providerId: model?.provider_id, model: model?.model })
       }}
-      disabled={providers.length <= 1}
+      disabled={modelProfiles.length <= 1}
       className={`${baseControlClass} w-full truncate`}
     >
-      {providers.length === 0 && <option value="">默认上游</option>}
-      {providers.map((provider) => (
-        <option key={provider.id} value={provider.id}>{provider.name}</option>
-      ))}
-    </select>
-  )
-
-  const renderModelDropdown = () => (
-    <select
-      value={params.model || activeProvider?.default_model || activeModels[0] || ''}
-      onChange={(e) => setParams({ model: e.target.value })}
-      disabled={activeModels.length <= 1}
-      className={`${baseControlClass} w-full truncate font-mono`}
-    >
-      {activeModels.length === 0 && <option value="">默认模型</option>}
-      {activeModels.map((model) => (
-        <option key={model} value={model}>{model}</option>
+      {modelProfiles.length === 0 && <option value="">未配置模型</option>}
+      {modelProfiles.map((model) => (
+        <option key={model.id} value={model.id}>{model.name || model.model} · {model.provider_name}</option>
       ))}
     </select>
   )
@@ -1497,13 +1482,9 @@ export default function InputBar() {
 
   const renderParams = (cols: string) => (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
-      <label className="relative flex flex-col gap-0.5">
-        <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">上游</span>
-        {renderProviderDropdown()}
-      </label>
-      <label className="relative flex flex-col gap-0.5">
+      <label className="relative flex flex-col gap-0.5 col-span-2">
         <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">模型</span>
-        {renderModelDropdown()}
+        {renderModelProfileDropdown()}
       </label>
       <label className="relative flex flex-col gap-0.5">
         <span className="ml-1 text-[11px] text-gray-400 dark:text-gray-500">尺寸</span>

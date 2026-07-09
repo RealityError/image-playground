@@ -297,6 +297,24 @@ export interface AdminProvidersResponse {
   }
 }
 
+export interface AdminModelProfile {
+  id: string
+  provider_id: string
+  provider_name?: string
+  model: string
+  name: string
+  enabled: boolean
+  default: boolean
+  parameter_template: string
+  parameters: Record<string, string[]>
+  provider_api_key_configured?: boolean
+}
+
+export interface AdminModelProfilesResponse {
+  items: AdminModelProfile[]
+  templates: Record<string, Record<string, string[]>>
+}
+
 export async function getAdminConfig(): Promise<AdminConfigResponse> {
   const raw = await adminJson('/admin/config')
   const config: Record<string, string> = raw.config ?? {}
@@ -334,6 +352,24 @@ export async function saveAdminProvider(profile: Partial<AdminProviderProfile> &
 
 export async function deleteAdminProvider(providerId: string) {
   return adminJson(`/admin/providers/${encodeURIComponent(providerId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function getAdminModelProfiles(): Promise<AdminModelProfilesResponse> {
+  return adminJson('/admin/model-profiles')
+}
+
+export async function saveAdminModelProfile(profile: Partial<AdminModelProfile>) {
+  return adminJson('/admin/model-profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  })
+}
+
+export async function deleteAdminModelProfile(modelProfileId: string) {
+  return adminJson(`/admin/model-profiles/${encodeURIComponent(modelProfileId)}`, {
     method: 'DELETE',
   })
 }

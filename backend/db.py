@@ -225,6 +225,20 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS model_profiles (
+                id TEXT PRIMARY KEY,
+                provider_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                parameter_template TEXT NOT NULL,
+                parameters_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(provider_id) REFERENCES provider_profiles(id)
+            );
             """
         )
 
@@ -1790,6 +1804,154 @@ def upsert_provider_profile(profile: dict[str, Any], *, updated_at: str) -> dict
 def delete_provider_profile(provider_id: str) -> bool:
     with get_connection() as connection:
         cursor = connection.execute("DELETE FROM provider_profiles WHERE id = ?", (provider_id,))
+        return bool(cursor.rowcount)
+
+
+def _serialize_model_row(row: sqlite3.Row) -> dict[str, Any]:
+    payload = dict(row)
+    payload["enabled"] = bool(payload.get("enabled"))
+    payload["default"] = bool(payload.pop("is_default", 0))
+    payload["parameters"] = _safe_json_loads(payload.pop("parameters_json", "{}"), {})
+    payload["provider_api_key_configured"] = bool(payload.pop("provider_api_key", "") or "")
+    return payload
+
+
+def list_model_profiles(*, include_disabled: bool = True) -> list[dict[str, Any]]:
+    filters = []
+    if not include_disabled:
+        filters.append("mp.enabled = 1")
+        filters.append("pp.enabled = 1")
+    where = _build_where(filters)
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                mp.*,
+                pp.name AS provider_name,
+                pp.provider_type AS provider_type,
+                pp.base_url AS provider_base_url,
+                pp.api_key AS provider_api_key,
+                pp.enabled AS provider_enabled
+            FROM model_profiles mp
+            JOIN provider_profiles pp ON pp.id = mp.provider_id
+            {where}
+            ORDER BY mp.is_default DESC, pp.name COLLATE NOCASE ASC, mp.name COLLATE NOCASE ASC, mp.id ASC
+            """
+        ).fetchall()
+    return [_serialize_model_row(row) for row in rows]
+
+
+def get_model_profile(model_profile_id: str) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                mp.*,
+                pp.name AS provider_name,
+                pp.provider_type AS provider_type,
+                pp.base_url AS provider_base_url,
+                pp.api_key AS provider_api_key,
+                pp.enabled AS provider_enabled
+            FROM model_profiles mp
+            JOIN provider_profiles pp ON pp.id = mp.provider_id
+            WHERE mp.id = ?
+            """,
+            (model_profile_id,),
+        ).fetchone()
+    return _serialize_model_row(row) if row else None
+
+
+def get_default_model_profile() -> dict[str, Any] | None:
+    rows = list_model_profiles(include_disabled=False)
+    for row in rows:
+        if row.get("default") and row.get("provider_api_key_configured"):
+            return row
+    for row in rows:
+        if row.get("provider_api_key_configured"):
+            return row
+    return None
+
+
+def upsert_model_profile(profile: dict[str, Any], *, updated_at: str) -> dict[str, Any]:
+    model_profile_id = str(profile.get("id") or "").strip()
+    provider_id = str(profile.get("provider_id") or "").strip()
+    model = str(profile.get("model") or "").strip()
+    name = str(profile.get("name") or model).strip()
+    parameter_template = str(profile.get("parameter_template") or "custom").strip()
+    if not model_profile_id:
+        raise ValueError("model profile id is required")
+    if not provider_id:
+        raise ValueError("provider_id is required")
+    if not model:
+        raise ValueError("model is required")
+    if not name:
+        raise ValueError("model profile name is required")
+    if get_provider_profile(provider_id) is None:
+        raise ValueError(f"provider not found: {provider_id}")
+
+    enabled = 1 if bool(profile.get("enabled", True)) else 0
+    is_default = 1 if bool(profile.get("default", False)) else 0
+    parameters = profile.get("parameters")
+    if not isinstance(parameters, dict):
+        parameters = {}
+    normalized_parameters: dict[str, list[str]] = {}
+    for key, values in parameters.items():
+        clean_key = str(key).strip()
+        if not clean_key:
+            continue
+        if isinstance(values, list):
+            normalized_parameters[clean_key] = [str(value).strip() for value in values if str(value).strip()]
+        elif values is True:
+            normalized_parameters[clean_key] = []
+
+    with get_connection() as connection:
+        existing = connection.execute(
+            "SELECT created_at FROM model_profiles WHERE id = ?",
+            (model_profile_id,),
+        ).fetchone()
+        created_at = str(existing["created_at"]) if existing else updated_at
+        if is_default:
+            connection.execute("UPDATE model_profiles SET is_default = 0 WHERE provider_id = ?", (provider_id,))
+        connection.execute(
+            """
+            INSERT INTO model_profiles (
+                id, provider_id, model, name, enabled, is_default,
+                parameter_template, parameters_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                provider_id = excluded.provider_id,
+                model = excluded.model,
+                name = excluded.name,
+                enabled = excluded.enabled,
+                is_default = excluded.is_default,
+                parameter_template = excluded.parameter_template,
+                parameters_json = excluded.parameters_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                model_profile_id,
+                provider_id,
+                model,
+                name,
+                enabled,
+                is_default,
+                parameter_template,
+                json.dumps(normalized_parameters, ensure_ascii=False),
+                created_at,
+                updated_at,
+            ),
+        )
+
+    saved = get_model_profile(model_profile_id)
+    if saved is None:
+        raise RuntimeError("failed to save model profile")
+    return saved
+
+
+def delete_model_profile(model_profile_id: str) -> bool:
+    with get_connection() as connection:
+        cursor = connection.execute("DELETE FROM model_profiles WHERE id = ?", (model_profile_id,))
         return bool(cursor.rowcount)
 
 

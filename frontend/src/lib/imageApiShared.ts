@@ -30,6 +30,14 @@ export interface CallApiResult {
     provider_type?: string
     default_model?: string
   }
+  modelProfile?: {
+    id?: string
+    provider_id?: string
+    provider_name?: string
+    model?: string
+    name?: string
+    parameter_template?: string
+  }
 }
 
 function formatMiB(bytes: number): string {

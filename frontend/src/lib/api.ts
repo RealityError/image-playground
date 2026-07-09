@@ -56,6 +56,7 @@ function appendCommonParams(target: Record<string, unknown> | FormData, opts: Ca
   const params = opts.params
   const entries = [
     ['prompt', opts.prompt],
+    ['model_profile_id', params.modelProfileId],
     ['provider_id', params.providerId],
     ['model', params.model],
     ['size', params.size],
@@ -93,6 +94,7 @@ async function resultToDataUrls(payload: any): Promise<CallApiResult> {
     completedAt: payload.completed_at,
     elapsedSeconds: payload.elapsed_seconds,
     provider: payload.provider,
+    modelProfile: payload.model_profile,
   }
 }
 

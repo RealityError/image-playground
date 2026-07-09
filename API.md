@@ -13,7 +13,7 @@ http://<server-ip>:30116
 - Admin calls use `/admin/*`; the admin page path is configured by `ADMIN_PAGE_PATH` and `GET /admin` intentionally returns 404.
 - API token is the same as the web space passphrase.
 - Web and API calls share the same space, history ownership, block status, and concurrency quota.
-- Upstream providers are configured by admins in the console. API callers may pass `provider_id` and `model`; unsupported provider parameters fail with `400`.
+- Upstream providers and model profiles are configured by admins in the console. API callers may pass `model_profile_id`; unsupported model parameters fail with `400`.
 - Concurrent limit: 3 active generation/edit jobs per space.
 - Generated files are saved locally and served through authenticated image routes.
 
@@ -70,6 +70,7 @@ Request:
 Supported fields:
 
 - `prompt`: required.
+- `model_profile_id`: optional. Uses the default enabled model profile when omitted.
 - `provider_id`: optional. Uses the first enabled admin-configured upstream with an API Key when omitted.
 - `model`: optional. Must be available on the selected upstream.
 - `n`: optional, `1` to `8`.

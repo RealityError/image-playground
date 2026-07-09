@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
-import type { ActualTaskParams, AppSettings, TaskParams, InputImage, MaskDraft, TaskRecord, StoredImageThumbnail, ExportData, ProviderProfile } from './types'
+import type { ActualTaskParams, AppSettings, TaskParams, InputImage, MaskDraft, TaskRecord, StoredImageThumbnail, ExportData, ProviderProfile, ModelProfile } from './types'
 import { DEFAULT_PARAMS } from './types'
 import {
   getAllTasks,
@@ -208,26 +208,27 @@ function scheduleBackfill(imageIds: string[]) {
 
 export async function loadProviderProfiles() {
   try {
-    const payload = await webJson('/web/providers')
-    const providers = Array.isArray(payload.items) ? payload.items as ProviderProfile[] : []
+    const [providerPayload, modelPayload] = await Promise.all([
+      webJson('/web/providers'),
+      webJson('/web/model-profiles'),
+    ])
+    const providers = Array.isArray(providerPayload.items) ? providerPayload.items as ProviderProfile[] : []
+    const modelProfiles = Array.isArray(modelPayload.items) ? modelPayload.items as ModelProfile[] : []
     const currentParams = useStore.getState().params
-    const currentProvider = providers.find((provider) => provider.id === currentParams.providerId)
-    const nextProvider = currentProvider || providers[0]
-    const nextModel = nextProvider
-      ? nextProvider.models.includes(currentParams.model || '')
-        ? currentParams.model
-        : nextProvider.default_model || nextProvider.models[0]
-      : currentParams.model
+    const currentModelProfile = modelProfiles.find((model) => model.id === currentParams.modelProfileId)
+    const nextModelProfile = currentModelProfile || modelProfiles.find((model) => model.default) || modelProfiles[0]
     useStore.setState({
       providers,
+      modelProfiles,
       params: {
         ...currentParams,
-        providerId: nextProvider?.id,
-        model: nextModel,
+        modelProfileId: nextModelProfile?.id,
+        providerId: nextModelProfile?.provider_id,
+        model: nextModelProfile?.model,
       },
     })
   } catch {
-    useStore.setState({ providers: [] })
+    useStore.setState({ providers: [], modelProfiles: [] })
   }
 }
 
@@ -321,6 +322,8 @@ interface AppState {
   setParams: (p: Partial<TaskParams>) => void
   providers: ProviderProfile[]
   setProviders: (providers: ProviderProfile[]) => void
+  modelProfiles: ModelProfile[]
+  setModelProfiles: (modelProfiles: ModelProfile[]) => void
 
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
@@ -433,6 +436,8 @@ export const useStore = create<AppState>()(
       setParams: (p) => set((state) => ({ params: { ...state.params, ...p } })),
       providers: [],
       setProviders: (providers) => set({ providers }),
+      modelProfiles: [],
+      setModelProfiles: (modelProfiles) => set({ modelProfiles }),
 
       tasks: [],
       setTasks: (tasks) => set({ tasks }),
@@ -615,7 +620,7 @@ async function applyTaskResult(taskId: string, result: CallApiResult) {
     serverThumbnailUrls: Object.keys(serverThumbnailUrls).length ? serverThumbnailUrls : undefined,
     providerId: result.provider?.id || task.providerId,
     providerName: result.provider?.name || task.providerName,
-    model: task.params.model || task.model,
+    model: result.modelProfile?.model || task.params.model || task.model,
     actualParams,
     actualParamsByImage: Object.keys(actualParamsByImage).length ? actualParamsByImage : undefined,
     revisedPromptByImage: Object.keys(revisedPromptByImage).length ? revisedPromptByImage : undefined,
@@ -762,7 +767,7 @@ async function cleanOrphanImages() {
 
 export async function submitTask(options?: { allowFullMask?: boolean }) {
   const state = useStore.getState()
-  const { prompt, inputImages, maskDraft, params, settings, serverStats, providers } = state
+  const { prompt, inputImages, maskDraft, params, settings, serverStats, modelProfiles } = state
 
   if (!prompt.trim() && inputImages.length === 0) {
     useStore.getState().showToast('请输入提示词或添加图片', 'error')
@@ -808,8 +813,9 @@ export async function submitTask(options?: { allowFullMask?: boolean }) {
       id: genId(),
       prompt: prompt.trim(),
       params: { ...params, n: 1 },
+      modelProfileId: params.modelProfileId,
       providerId: params.providerId,
-      providerName: providers.find((provider) => provider.id === params.providerId)?.name,
+      providerName: modelProfiles.find((model) => model.id === params.modelProfileId)?.provider_name,
       model: params.model,
       operation: maskImageId ? 'edit' : inputImageIds.length > 0 ? 'reference' : 'generate',
       inputImageIds,

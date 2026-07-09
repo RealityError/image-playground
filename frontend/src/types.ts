@@ -18,9 +18,21 @@ export interface ProviderProfile {
   parameters?: Record<string, string[]>
 }
 
+export interface ModelProfile {
+  id: string
+  provider_id: string
+  provider_name: string
+  model: string
+  name: string
+  default?: boolean
+  parameter_template: string
+  parameters?: Record<string, string[]>
+}
+
 // ===== 任务参数 =====
 
 export interface TaskParams {
+  modelProfileId?: string
   providerId?: string
   model?: string
   size: string
@@ -68,6 +80,7 @@ export interface TaskRecord {
   /** 输出图片对应的实际像素尺寸，key 为 outputImages 中的图片 id */
   outputImageDimensions?: Record<string, { width: number; height: number }>
   operation?: 'generate' | 'reference' | 'edit' | string
+  modelProfileId?: string
   providerId?: string
   providerName?: string
   model?: string

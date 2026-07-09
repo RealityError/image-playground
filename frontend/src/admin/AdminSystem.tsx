@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import {
   adminJson,
   deleteAdminProvider,
+  deleteAdminModelProfile,
   getAdminConfig,
+  getAdminModelProfiles,
   getAdminProviders,
+  saveAdminModelProfile,
   saveAdminProvider,
   setAdminConfig,
   type AdminConfigItem,
+  type AdminModelProfile,
   type AdminProviderProfile,
   type AdminSystemStatus,
 } from '../lib/adminApi'
@@ -52,6 +56,7 @@ export default function AdminSystem() {
       {/* Runtime Config */}
       <RuntimeConfigCard />
       <ProviderConfigCard />
+      <ModelProfileConfigCard />
 
       {/* Live Metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -144,13 +149,9 @@ function defaultProviderDraft(): AdminProviderProfile & { api_key?: string; clea
     provider_type: 'openai-compatible',
     base_url: '',
     enabled: true,
-    default_model: 'gpt-image-2',
-    models: ['gpt-image-2'],
-    parameters: {
-      size: ['auto', '1024x1024', '1536x1024', '1024x1536'],
-      quality: ['auto', 'low', 'medium', 'high'],
-      response_format: ['url', 'b64_json'],
-    },
+    default_model: '',
+    models: [],
+    parameters: {},
     api_key_configured: false,
     api_key_preview: '',
   }
@@ -189,7 +190,9 @@ function ProviderConfigCard() {
     try {
       await saveAdminProvider({
         ...draft,
-        models: draft.models?.length ? draft.models : [draft.default_model],
+        default_model: draft.default_model || 'managed-by-model-profiles',
+        models: [],
+        parameters: {},
       })
       setSuccess('Provider 已保存')
       setDraft((current) => ({ ...current, api_key: '', clear_api_key: false }))
@@ -253,19 +256,7 @@ function ProviderConfigCard() {
         <AdminTextInput label="ID" value={draft.id} onChange={(value) => update({ id: value })} />
         <AdminTextInput label="名称" value={draft.name} onChange={(value) => update({ name: value })} />
         <AdminTextInput label="Base URL" value={draft.base_url || ''} onChange={(value) => update({ base_url: value })} />
-        <AdminTextInput label="默认模型" value={draft.default_model} onChange={(value) => update({ default_model: value })} />
-        <AdminTextInput label="模型列表" value={joinCsv(draft.models)} onChange={(value) => update({ models: splitCsv(value) })} />
         <AdminTextInput label="API Key" type="password" value={draft.api_key || ''} placeholder={draft.api_key_configured ? `已配置 ${draft.api_key_preview || ''}` : '未配置'} onChange={(value) => update({ api_key: value, clear_api_key: false })} />
-      </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {(['size', 'quality', 'response_format'] as const).map((key) => (
-          <AdminTextInput
-            key={key}
-            label={`参数 ${key}`}
-            value={joinCsv(draft.parameters?.[key])}
-            onChange={(value) => update({ parameters: { ...(draft.parameters || {}), [key]: splitCsv(value) } })}
-          />
-        ))}
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
@@ -291,6 +282,193 @@ function ProviderConfigCard() {
           className="rounded-lg bg-gray-900 dark:bg-gray-100 px-3 py-1.5 text-xs font-semibold text-white dark:text-gray-950 disabled:opacity-50"
         >
           {saving ? '保存中...' : '保存 Provider'}
+        </button>
+        {items.some((item) => item.id === draft.id) && (
+          <button
+            type="button"
+            onClick={() => void remove(draft.id)}
+            className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-400"
+          >
+            删除
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function defaultModelDraft(providerId = ''): AdminModelProfile {
+  return {
+    id: '',
+    provider_id: providerId,
+    model: '',
+    name: '',
+    enabled: true,
+    default: false,
+    parameter_template: 'openai-gpt-image',
+    parameters: {},
+  }
+}
+
+function ModelProfileConfigCard() {
+  const [providers, setProviders] = useState<AdminProviderProfile[]>([])
+  const [items, setItems] = useState<AdminModelProfile[]>([])
+  const [templates, setTemplates] = useState<Record<string, Record<string, string[]>>>({})
+  const [draft, setDraft] = useState<AdminModelProfile>(defaultModelDraft())
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const [providerRes, modelRes] = await Promise.all([getAdminProviders(), getAdminModelProfiles()])
+      const providerItems = providerRes.items || []
+      setProviders(providerItems)
+      setItems(modelRes.items || [])
+      setTemplates(modelRes.templates || {})
+      if (modelRes.items?.[0]) setDraft(modelRes.items[0])
+      else setDraft(defaultModelDraft(providerItems[0]?.id || ''))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载模型配置失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  const update = (patch: Partial<AdminModelProfile>) => setDraft((current) => ({ ...current, ...patch }))
+  const activeTemplate = templates[draft.parameter_template] || {}
+  const mergedParameters = { ...activeTemplate, ...(draft.parameters || {}) }
+
+  const save = async () => {
+    setSaving(true)
+    setError('')
+    setSuccess('')
+    try {
+      const nextId = draft.id || `${draft.provider_id}-${draft.model}`.replace(/[^a-zA-Z0-9_.-]+/g, '-')
+      await saveAdminModelProfile({
+        ...draft,
+        id: nextId,
+        name: draft.name || draft.model,
+        parameters: draft.parameters || {},
+      })
+      setSuccess('模型配置已保存')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存模型配置失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async (modelProfileId: string) => {
+    setError('')
+    setSuccess('')
+    try {
+      await deleteAdminModelProfile(modelProfileId)
+      setSuccess('模型配置已删除')
+      setDraft(defaultModelDraft(providers[0]?.id || ''))
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '删除模型配置失败')
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-950 shadow-sm p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">模型配置</h3>
+        <button
+          type="button"
+          onClick={() => setDraft(defaultModelDraft(providers[0]?.id || ''))}
+          className="rounded-lg bg-gray-100 dark:bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
+        >
+          新建
+        </button>
+      </div>
+      {loading && <p className="text-xs text-gray-500 dark:text-gray-400">加载中...</p>}
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      {success && <p className="text-xs text-green-600 dark:text-green-400">{success}</p>}
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setDraft(item)}
+              className={`rounded-lg border px-2.5 py-1 text-xs ${
+                draft.id === item.id
+                  ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-950'
+                  : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-gray-300'
+              }`}
+            >
+              {item.name || item.model}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <AdminTextInput label="ID" value={draft.id} onChange={(value) => update({ id: value })} />
+        <label className="block">
+          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">所属上游</span>
+          <select
+            value={draft.provider_id}
+            onChange={(e) => update({ provider_id: e.target.value })}
+            className="w-full rounded-lg border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-gray-900/10"
+          >
+            <option value="">请选择上游</option>
+            {providers.map((provider) => (
+              <option key={provider.id} value={provider.id}>{provider.name}</option>
+            ))}
+          </select>
+        </label>
+        <AdminTextInput label="模型 ID" value={draft.model} onChange={(value) => update({ model: value })} />
+        <AdminTextInput label="显示名称" value={draft.name} onChange={(value) => update({ name: value })} />
+        <label className="block">
+          <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">参数模板</span>
+          <select
+            value={draft.parameter_template}
+            onChange={(e) => update({ parameter_template: e.target.value })}
+            className="w-full rounded-lg border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-gray-900/10"
+          >
+            {Object.keys(templates).map((template) => (
+              <option key={template} value={template}>{template}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {Object.keys(mergedParameters).map((key) => (
+          <AdminTextInput
+            key={key}
+            label={`参数 ${key}`}
+            value={joinCsv((draft.parameters?.[key] ?? activeTemplate[key]) || [])}
+            onChange={(value) => update({ parameters: { ...(draft.parameters || {}), [key]: splitCsv(value) } })}
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <input type="checkbox" checked={draft.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
+          启用
+        </label>
+        <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <input type="checkbox" checked={draft.default} onChange={(e) => update({ default: e.target.checked })} />
+          默认
+        </label>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="rounded-lg bg-gray-900 dark:bg-gray-100 px-3 py-1.5 text-xs font-semibold text-white dark:text-gray-950 disabled:opacity-50"
+        >
+          {saving ? '保存中...' : '保存模型'}
         </button>
         {items.some((item) => item.id === draft.id) && (
           <button

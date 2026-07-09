@@ -36,6 +36,8 @@ from db import (
     get_input_image,
     get_input_images,
     get_owner_job_detail,
+    get_default_model_profile,
+    get_model_profile,
     get_provider_profile_secret,
     get_runtime_config,
     init_db,
@@ -46,6 +48,7 @@ from db import (
     list_admin_owners,
     list_auth_events,
     list_history_images,
+    list_model_profiles,
     list_provider_profiles,
     log_auth_event,
     log_generation_failed,
@@ -61,13 +64,18 @@ from db import (
     soft_delete_owner_job,
     soft_delete_owner_jobs,
     delete_provider_profile,
+    delete_model_profile,
     update_image_thumbnail_path,
+    upsert_model_profile,
     upsert_provider_profile,
 )
 from providers import (
     DEFAULT_PROVIDER_PARAMETERS,
+    MODEL_PARAMETER_TEMPLATES,
+    ModelProfile,
     ProviderProfile,
     build_provider_request,
+    model_from_request_params,
     provider_from_request_params,
     public_request_params,
     upstream_request_params,
@@ -151,10 +159,9 @@ def get_image_api_timeout() -> float:
 
 
 def get_model_name() -> str:
-    rows = list_provider_profiles(include_disabled=False, include_secret=False)
-    configured_row = next((row for row in rows if row.get("api_key_configured")), None)
-    if configured_row:
-        return str(configured_row.get("default_model") or "未配置")
+    model_row = get_default_model_profile()
+    if model_row:
+        return str(model_row.get("model") or "未配置")
     return "未配置"
 
 
@@ -183,12 +190,43 @@ def resolve_provider_profile(provider_id: str | None = None) -> ProviderProfile:
     return profile
 
 
+def resolve_model_and_provider(
+    *,
+    model_profile_id: str | None = None,
+    provider_id: str | None = None,
+) -> tuple[ModelProfile, ProviderProfile]:
+    normalized_model_profile_id = clean_text(model_profile_id)
+    if normalized_model_profile_id:
+        model_row = get_model_profile(normalized_model_profile_id)
+        if model_row is None:
+            raise HTTPException(status_code=400, detail=f"Model profile not found: {normalized_model_profile_id}.")
+    else:
+        model_row = get_default_model_profile()
+        if model_row is None:
+            raise HTTPException(status_code=500, detail="No enabled model with configured provider API key is configured.")
+
+    model_profile = ModelProfile.from_mapping(model_row)
+    requested_provider_id = clean_text(provider_id)
+    if requested_provider_id and requested_provider_id != model_profile.provider_id:
+        raise HTTPException(status_code=400, detail="provider_id does not match selected model profile.")
+    provider = resolve_provider_profile(model_profile.provider_id)
+    return model_profile, provider
+
+
 def public_provider_profiles() -> list[dict[str, Any]]:
     rows = list_provider_profiles(include_disabled=False, include_secret=False)
     return [
         ProviderProfile.from_mapping(row).public_snapshot()
         for row in rows
         if row.get("api_key_configured")
+    ]
+
+
+def public_model_profiles() -> list[dict[str, Any]]:
+    return [
+        ModelProfile.from_mapping(row).public_snapshot()
+        for row in list_model_profiles(include_disabled=False)
+        if row.get("provider_api_key_configured")
     ]
 
 
@@ -220,6 +258,7 @@ def apply_web_headers(response: Response) -> Response:
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
+    model_profile_id: str | None = Field(default=None, max_length=120)
     provider_id: str | None = Field(default=None, max_length=80)
     model: str | None = Field(default=None, max_length=160)
     n: int | None = Field(default=None, ge=1, le=8)
@@ -297,6 +336,17 @@ class AdminProviderProfileRequest(BaseModel):
     enabled: bool = True
     default_model: str = Field(min_length=1, max_length=160)
     models: list[str] = Field(default_factory=list, max_length=50)
+    parameters: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class AdminModelProfileRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=120)
+    provider_id: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    default: bool = False
+    parameter_template: str = Field(default="custom", max_length=80)
     parameters: dict[str, list[str]] = Field(default_factory=dict)
 
 
@@ -1242,10 +1292,13 @@ def build_generate_params(payload: GenerateRequest) -> tuple[str, dict[str, Any]
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required.")
 
-    provider = resolve_provider_profile(payload.provider_id)
+    model_profile, provider = resolve_model_and_provider(
+        model_profile_id=payload.model_profile_id,
+        provider_id=payload.provider_id,
+    )
     requested_model = clean_text(payload.model)
     request_params: dict[str, Any] = {
-        "model": requested_model or provider.default_model,
+        "model": requested_model or model_profile.model,
         "prompt": prompt,
     }
 
@@ -1270,7 +1323,7 @@ def build_generate_params(payload: GenerateRequest) -> tuple[str, dict[str, Any]
         if value is not None:
             request_params[key] = value
 
-    return prompt, build_provider_request(provider, request_params)
+    return prompt, build_provider_request(provider, request_params, model_profile=model_profile)
 
 
 def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[StarletteUploadFile], StarletteUploadFile | None]:
@@ -1289,10 +1342,13 @@ def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[Starlette
     mask_value = form.get("mask")
     mask_upload = mask_value if isinstance(mask_value, StarletteUploadFile) and mask_value.filename else None
 
-    provider = resolve_provider_profile(clean_text(form.get("provider_id")))
+    model_profile, provider = resolve_model_and_provider(
+        model_profile_id=clean_text(form.get("model_profile_id")),
+        provider_id=clean_text(form.get("provider_id")),
+    )
     requested_model = clean_text(form.get("model"))
     request_params: dict[str, Any] = {
-        "model": requested_model or provider.default_model,
+        "model": requested_model or model_profile.model,
         "prompt": prompt,
     }
 
@@ -1315,7 +1371,7 @@ def parse_edit_form(form: FormData) -> tuple[str, dict[str, Any], list[Starlette
         if value is not None:
             request_params[key] = value
 
-    return prompt, build_provider_request(provider, request_params), image_uploads, mask_upload
+    return prompt, build_provider_request(provider, request_params, model_profile=model_profile), image_uploads, mask_upload
 
 
 def build_api_owner(request_params: dict[str, Any], ip: str) -> tuple[str, str]:
@@ -1347,6 +1403,7 @@ def create_job(
     cleanup_prepared_paths: bool = False,
 ) -> dict[str, Any]:
     provider = provider_from_request_params(request_params) or resolve_provider_profile()
+    model_profile = model_from_request_params(request_params)
     client = get_client(provider)
     job_id = job_id or build_job_id()
     created_at = created_at or now_iso()
@@ -1498,6 +1555,7 @@ def create_job(
         "operation": operation,
         "prompt": prompt,
         "model": str(stored_request_params.get("model") or provider.default_model),
+        "model_profile": model_profile.public_snapshot() if model_profile else None,
         "provider": provider.public_snapshot(),
         "request_params": stored_request_params,
         "actual_params": actual_params,
@@ -1600,6 +1658,7 @@ def serialize_public_api_job(result: dict[str, Any]) -> dict[str, Any]:
         "created_at": result.get("created_at"),
         "operation": result.get("operation"),
         "model": result.get("model"),
+        "model_profile": result.get("model_profile"),
         "provider": result.get("provider"),
         "request_params": result.get("request_params") or {},
         "actual_params": result.get("actual_params") or {},
@@ -1627,7 +1686,7 @@ def api_catalog_payload() -> dict[str, Any]:
             "edit_images_field": "image or image[]",
         },
         "parameters": {
-            "supported": ["prompt", "provider_id", "model", "n", "size", "aspect_ratio", "quality", "response_format", "image", "mask"],
+            "supported": ["prompt", "model_profile_id", "provider_id", "model", "n", "size", "aspect_ratio", "quality", "response_format", "image", "mask"],
             "forwarded_upstream": ["model", "prompt", "n", "size", "quality", "response_format", "image", "mask"],
             "sizes": ["auto", "1024x1024", "1536x1024", "1024x1536", "2048x1152", "1152x2048", "2048x2048", "3840x2160", "2160x3840"],
             "size_constraints": {
@@ -1646,14 +1705,14 @@ def api_catalog_payload() -> dict[str, Any]:
                 "path": "/api/v1/generate",
                 "content_type": "application/json",
                 "description": "Text-to-image generation.",
-                "body": {"prompt": "string", "provider_id": "optional", "model": "optional", "size": "1024x1024", "quality": "auto", "response_format": "b64_json"},
+                "body": {"prompt": "string", "model_profile_id": "optional", "provider_id": "optional", "model": "optional", "size": "1024x1024", "quality": "auto", "response_format": "b64_json"},
             },
             {
                 "method": "POST",
                 "path": "/api/v1/edit",
                 "content_type": "multipart/form-data",
                 "description": "Image editing with one or more ordered input images.",
-                "fields": {"prompt": "string", "provider_id": "optional", "model": "optional", "image": "file[]", "mask": "file optional", "size": "optional", "quality": "optional"},
+                "fields": {"prompt": "string", "model_profile_id": "optional", "provider_id": "optional", "model": "optional", "image": "file[]", "mask": "file optional", "size": "optional", "quality": "optional"},
             },
             {"method": "GET", "path": "/api/v1/images/{job_id}/{image_index}", "description": "Fetch generated image with API token."},
             {"method": "GET", "path": "/api/v1/thumbs/{job_id}/{image_index}", "description": "Fetch generated thumbnail with API token."},
@@ -1807,6 +1866,7 @@ def enqueue_web_job(
     mask_used: bool = False,
 ) -> dict[str, Any]:
     provider = provider_from_request_params(request_params) or resolve_provider_profile()
+    model_profile = model_from_request_params(request_params)
     stored_request_params = public_request_params(request_params)
     slot_id = acquire_generation_slot(slot_key, "web", owner_ip=ip)
     job_id = build_job_id()
@@ -1908,6 +1968,7 @@ def enqueue_web_job(
         "operation": operation,
         "prompt": prompt,
         "model": str(stored_request_params.get("model") or provider.default_model),
+        "model_profile": model_profile.public_snapshot() if model_profile else None,
         "provider": provider.public_snapshot(),
         "request_params": stored_request_params,
         "actual_params": {},
@@ -2265,6 +2326,14 @@ def web_providers(request: Request) -> dict[str, Any]:
     _, _, _, _ = require_web_owner(request)
     providers = public_provider_profiles()
     return {"items": providers, "default_provider_id": providers[0]["id"] if providers else ""}
+
+
+@app.get("/web/model-profiles")
+def web_model_profiles(request: Request) -> dict[str, Any]:
+    _, _, _, _ = require_web_owner(request)
+    models = public_model_profiles()
+    default_model = next((item for item in models if item.get("default")), models[0] if models else None)
+    return {"items": models, "default_model_profile_id": default_model.get("id") if default_model else ""}
 
 
 @app.post("/web/generate")
@@ -3005,7 +3074,7 @@ def admin_list_providers(request: Request) -> dict[str, Any]:
         "items": list_provider_profiles(include_disabled=True, include_secret=False),
         "defaults": {
             "provider_type": "openai-compatible",
-            "parameters": DEFAULT_PROVIDER_PARAMETERS,
+            "parameters": {},
         },
     }
 
@@ -3026,6 +3095,33 @@ def admin_delete_provider(request: Request, provider_id: str) -> dict[str, Any]:
     require_admin(request)
     deleted = delete_provider_profile(provider_id)
     return {"ok": deleted, "provider_id": provider_id}
+
+
+@app.get("/admin/model-profiles")
+def admin_list_model_profiles(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    return {
+        "items": list_model_profiles(include_disabled=True),
+        "templates": MODEL_PARAMETER_TEMPLATES,
+    }
+
+
+@app.post("/admin/model-profiles")
+def admin_save_model_profile(request: Request, payload: AdminModelProfileRequest) -> dict[str, Any]:
+    require_admin(request)
+    try:
+        raw_payload = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+        profile = upsert_model_profile(raw_payload, updated_at=now_iso())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "profile": profile}
+
+
+@app.delete("/admin/model-profiles/{model_profile_id}")
+def admin_delete_model_profile(request: Request, model_profile_id: str) -> dict[str, Any]:
+    require_admin(request)
+    deleted = delete_model_profile(model_profile_id)
+    return {"ok": deleted, "model_profile_id": model_profile_id}
 
 
 @app.get("/admin/auth-events")
